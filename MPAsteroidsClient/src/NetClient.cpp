@@ -15,8 +15,8 @@ ENetPeer* server = { 0 };
 // how long in seconds since the last time we sent an update
 double lastInputSend = -100;
 
-// how long to wait between updates (20 update ticks a second)
-double updateInterval = 1.0f / 20.0f;
+// how long to wait between updates (30 update ticks a second)
+const double updateInterval = 1.0f / 30.0f;
 
 double lastNow = 0;
 
@@ -31,16 +31,9 @@ struct RemotePlayers
 };
 
 static RemotePlayers players[MAX_PLAYERS] = { 0 };
-
-struct AsteroidInfo
-{
-    int Id;
-    bool Active = false;
-    Vector3 Position;
-    Matrix Rotation;
-};
  
-std::vector<AsteroidInfo> Asteroids;
+AsteroidInfo Asteroids[MAX_ASTEROIDS];
+int AsteroidAmount = 0;
 
 void NetConnect(const char* serverAddress)
 {
@@ -150,21 +143,24 @@ bool GetPlayerSpatial(int id, Vector3* pos, Matrix* rot)
 
 void HandleAddAsteroid(AsteroidPacket packet)
 {
-    AsteroidInfo newAsteroid;
-    newAsteroid.Id = packet.Id;
-    newAsteroid.Position = packet.Position;
-    newAsteroid.Rotation = packet.Rotation;
-    Asteroids.push_back(newAsteroid);
+    //memcpy(Asteroids, packet.AllAsteroids, sizeof(packet.AllAsteroids));
+    for (int i = 0; i < packet.AsteroidCount && i < MAX_ASTEROIDS; i++) {
+        Asteroids[i] = packet.AllAsteroids[i];
+    }
+    AsteroidAmount = packet.AsteroidCount;
 }
 
-void HandleUpdateAsteroid(AsteroidPacket)
+void HandleUpdateAsteroid(AsteroidPacket packet)
 {
-    return;
+    for (int i = 0; i < packet.AsteroidCount && i < MAX_ASTEROIDS; i++) {
+        Asteroids[i] = packet.AllAsteroids[i];
+    }
+    AsteroidAmount = packet.AsteroidCount;
 }
 
 bool GetAsteroidSpatial(int id, Vector3* pos, Matrix* rot)
 {
-    if(id < 0 || id >= Asteroids.size())
+    if(id < 0 || id >= AsteroidAmount)
     {
         return false;
     }
@@ -176,7 +172,7 @@ bool GetAsteroidSpatial(int id, Vector3* pos, Matrix* rot)
 
 int GetMaxAsteroids()
 {
-    return Asteroids.size();
+    return AsteroidAmount;
 }
 
 void NetUpdate(double now, float delta)
@@ -205,9 +201,8 @@ void NetUpdate(double now, float delta)
     }
 
     ENetEvent event = {};
-
     if (enet_host_service(client, &event, 0) > 0)
-    {
+    {  
         switch(event.type)
         {
             case ENET_EVENT_TYPE_CONNECT:
@@ -228,12 +223,10 @@ void NetUpdate(double now, float delta)
                     PlayerPacket recieved;
                     memcpy(&recieved, event.packet->data, sizeof(PlayerPacket));
 
-                    NetworkCommands command = (NetworkCommands)recieved.Command;
-
                     // If we have an id in the server, do what the server wants us to do
                     if (localPlayerId != -1)
                     {
-                        switch (command)
+                        switch (recieved.Command)
                         {
                             case AddPlayer:
                                 HandleAddPlayer(recieved);
@@ -251,7 +244,7 @@ void NetUpdate(double now, float delta)
                     // We do not have an ID in the server, so we need to read the accept command
                     else 
                     {
-                        if (command != AcceptPlayer) // Command SHOULD be accept player, but skip if it's not
+                        if (recieved.Command != AcceptPlayer) // Command SHOULD be accept player, but skip if it's not
                             return;
 
                         // Read id from command, check if in bounds, and prepare it to be in the game.
@@ -275,9 +268,7 @@ void NetUpdate(double now, float delta)
                     AsteroidPacket recieved;
                     memcpy(&recieved, event.packet->data, sizeof(AsteroidPacket));
 
-                    NetworkCommands command = (NetworkCommands)recieved.Command;
-
-                    switch(command)
+                    switch(recieved.Command)
                     {
                         case AddAsteroid:
                             HandleAddAsteroid(recieved);

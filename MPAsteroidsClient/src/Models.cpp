@@ -1,10 +1,15 @@
 #include "include/Models.h"
 
+#include <stdio.h>
+#include <float.h>
+
 namespace Models
 {
     Model Skybox;
     Model ShipModel;
+    BoundingBox ShipBoxLocal;
     Model AsteroidModel;
+    BoundingBox AsteroidBoxLocal;
 
     void Init()
     {
@@ -27,11 +32,13 @@ namespace Models
         ShipModel = LoadModel("resources/models/player_ship/spaceship.obj");
         Texture2D shipTexture = LoadTexture("resources/models/player_ship/ShipTextureDiffuse.png");
         ShipModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = shipTexture;
+        ShipBoxLocal = GetModelBoundingBox(ShipModel);
 
         // Load asteroid model & texture
         AsteroidModel = LoadModel("resources/models/asteroid/asteroid.obj");
         Texture2D asteroidTexture = LoadTexture("resources/models/asteroid/AsteroidTextureDiffuse.png");
         AsteroidModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = asteroidTexture;
+        AsteroidBoxLocal = GetModelBoundingBox(AsteroidModel);
     }
 
     void Draw(Model model, const Vector3& position, const Matrix& rotation)
@@ -49,5 +56,35 @@ namespace Models
             DrawModel(Models::Skybox, (Vector3){ 0.0f, 0.0f, 0.0f }, 1.0f, WHITE);
         rlEnableBackfaceCulling();
         rlEnableDepthMask();
+    }
+
+    BoundingBox GetWorldBoundingBox(BoundingBox localBox, Vector3 position, Matrix rotation)
+    {
+        Vector3 corners[8] = {
+            { localBox.min.x, localBox.min.y, localBox.min.z },
+            { localBox.max.x, localBox.min.y, localBox.min.z },
+            { localBox.min.x, localBox.max.y, localBox.min.z },
+            { localBox.max.x, localBox.max.y, localBox.min.z },
+            { localBox.min.x, localBox.min.y, localBox.max.z },
+            { localBox.max.x, localBox.min.y, localBox.max.z },
+            { localBox.min.x, localBox.max.y, localBox.max.z },
+            { localBox.max.x, localBox.max.y, localBox.max.z }
+        };
+
+        BoundingBox result;
+        result.min = (Vector3){ FLT_MAX, FLT_MAX, FLT_MAX };
+        result.max = (Vector3){ -FLT_MAX, -FLT_MAX, -FLT_MAX };
+
+        for (int i = 0; i < 8; i++)
+        {
+            // Apply rotation then translate to position
+            Vector3 worldCorner = Vector3Transform(corners[i], rotation);
+            worldCorner = Vector3Add(worldCorner, position);
+
+            result.min = Vector3Min(result.min, worldCorner);
+            result.max = Vector3Max(result.max, worldCorner);
+        }
+
+        return result;
     }
 }

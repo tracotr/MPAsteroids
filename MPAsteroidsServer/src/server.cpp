@@ -3,9 +3,12 @@
 
 #include <stdio.h>
 #include <vector>
+#include <ctime>
+#include <random>
 
 struct PlayerInfo
 {
+    int Id;
     bool Active = false;
     bool ValidPosition = false;
     ENetPeer* Peer;
@@ -14,31 +17,44 @@ struct PlayerInfo
 };
 
 PlayerInfo Players[MAX_PLAYERS] = { 0 };
-
-struct AsteroidInfo
-{
-    int Id;
-    bool Active = false;
-    Vector3 Position;
-    Vector3 Velocity;
-    Matrix Rotation;
-};
  
-std::vector<AsteroidInfo> Asteroids;
+AsteroidInfo Asteroids[MAX_ASTEROIDS];
+int AsteroidAmount = 0;
+
+double lastAsteroidUpdateTime = 0;
+const double asteroidTickInterval = 1.0f / 30.0f; 
 
 ENetAddress address = { 0 };
 ENetHost* server = { 0 };
 
+std::random_device rd;
+std::mt19937 gen(rd());
+std::uniform_real_distribution<> rvelocity(-2, 2);
+std::uniform_real_distribution<> rdist(-25, 25);
+
+double GetTime()
+{
+    return (double)clock() / CLOCKS_PER_SEC;
+}
+
 // sends a packet over the network to every active player, except the one specified (usually the sender)
-void SendToAllBut(ENetPacket* packet, int exceptPlayerId)
+void SendPacketToAllBut(ENetPacket* packet, int exceptPlayerId, int Channel)
 {
 	for (int i = 0; i < MAX_PLAYERS; i++)
 	{
 		if (!Players[i].Active || i == exceptPlayerId)
 			continue;
 
-		enet_peer_send(Players[i].Peer, 0, packet);
+        ENetPacket* cloned = enet_packet_create(packet->data, packet->dataLength, packet->flags);
+		enet_peer_send(Players[i].Peer, Channel, cloned);
 	}
+}
+
+// sends a packet over the network to every active player, except the one specified (usually the sender)
+void SendPacketToOnly(ENetPacket* packet, int playerId, int Channel)
+{
+    ENetPacket* cloned = enet_packet_create(packet->data, packet->dataLength, packet->flags);
+	enet_peer_send(Players[playerId].Peer, Channel, cloned);
 }
 
 // finds player id of peer specified
@@ -53,18 +69,87 @@ int GetPlayerId(ENetPeer* peer)
 	return -1;
 }
 
-void SpawnAsteroidsAroundPlayer(Vector3 playerPosition)
+void SpawnAsteroidsAroundPlayer(PlayerInfo* player, int amount)
 {
-    // spawn asteroids for a test
-    for(int i = 0; i < 20; i++)
-    {
+    // spawn amount of asteroids 
+    for(int i = 0; i < amount; i++)
+    {   
+        // skip if we're over max
+        if(AsteroidAmount >= MAX_ASTEROIDS){
+            break;
+        }
+
         AsteroidInfo newAsteroid;
-        newAsteroid.Id = i;
-        newAsteroid.Position = (Vector3){ };
-        newAsteroid.Velocity = (Vector3){ 0.0f , 0.0f, 0.0f };
+        newAsteroid.Position = (Vector3){ rdist(gen), rdist(gen), rdist(gen) };
+        newAsteroid.Velocity = (Vector3){ rvelocity(gen) , rvelocity(gen), rvelocity(gen) };
         newAsteroid.Rotation = MatrixIdentity();
-        Asteroids.push_back(newAsteroid);
+        Asteroids[AsteroidAmount] = newAsteroid;
+        AsteroidAmount += 1;
     }
+}
+
+Vector3 GetNearestPlayerPosition(Vector3 asteroidPos)
+{
+    float closestDistSq = MAX_SQR_V3;
+    Vector3 closestPos = { 0 };
+
+    for (int i = 0; i < MAX_PLAYERS; i++)
+    {
+        if (!Players[i].Active)
+            continue;
+
+        float distSq = Vector3DistanceSqr(Players[i].Position, asteroidPos);
+        if (distSq < closestDistSq)
+        {
+            closestDistSq = distSq;
+            closestPos = Players[i].Position;
+        }
+    }
+
+    return closestPos;
+}
+
+void WrapAsteroid(AsteroidInfo* asteroid, Vector3 center, float wrapDistance)
+{
+    Vector3& pos = asteroid->Position;
+
+    if (pos.x > center.x + wrapDistance)
+        pos.x = center.x - wrapDistance;
+    else if (pos.x < center.x - wrapDistance)
+        pos.x = center.x + wrapDistance;
+
+    if (pos.y > center.y + wrapDistance)
+        pos.y = center.y - wrapDistance;
+    else if (pos.y < center.y - wrapDistance)
+        pos.y = center.y + wrapDistance;
+
+    if (pos.z > center.z + wrapDistance)
+        pos.z = center.z - wrapDistance;
+    else if (pos.z < center.z - wrapDistance)
+        pos.z = center.z + wrapDistance;
+}
+
+void UpdateAsteroids(double delta)
+{
+    // Update position of asteroids
+    for(int i = 0; i < AsteroidAmount; i++)
+    {
+        AsteroidInfo& asteroid = Asteroids[i];
+        asteroid.Position = Vector3Add(asteroid.Position, Vector3Scale(asteroid.Velocity, delta));
+        Vector3 closestPlayerPos = GetNearestPlayerPosition(asteroid.Position);
+        WrapAsteroid(&asteroid, closestPlayerPos, MAX_ASTEROID_DIST); 
+    }
+
+    // send position to players
+    AsteroidPacket buffer = { 0 };
+    buffer.Command = UpdateAsteroid;
+    memcpy(buffer.AllAsteroids, Asteroids, sizeof(Asteroids));
+    buffer.AsteroidCount = AsteroidAmount;
+
+    // create packet
+    ENetPacket* packet = enet_packet_create(&buffer, sizeof(buffer), ENET_PACKET_FLAG_UNSEQUENCED);
+    // send to all connected clients
+    SendPacketToAllBut(packet, -1, 1);
 }
 
 int main()
@@ -93,28 +178,19 @@ int main()
     bool run = true;
 	while (run)
 	{
-        // Update and send position of asteroids to players
-        for (auto& asteroid : Asteroids)
-        {   
-            // update position of asteroid
-            asteroid.Position = Vector3Add(asteroid.Position, asteroid.Velocity);
+        double now = GetTime();
+        double delta = now - lastAsteroidUpdateTime;
 
-            // send position to players
-            AsteroidPacket buffer = { 0 };
-            buffer.Command = UpdateAsteroid;
-            buffer.Id = asteroid.Id;
-            buffer.Position = asteroid.Position;
-            buffer.Rotation = asteroid.Rotation;
-
-            // create packet
-            ENetPacket* packet = enet_packet_create(&buffer, sizeof(buffer), ENET_PACKET_FLAG_RELIABLE);
-            // send to all connected clients
-            SendToAllBut(packet, -1);
+        // Only update asteroid movement if enough time has passed
+        if (delta >= asteroidTickInterval)
+        {
+            UpdateAsteroids(delta);
+            lastAsteroidUpdateTime = now;
         }
 
         // Check for events (updates from clients)
         ENetEvent event = {};
-        if (enet_host_service(server, &event, 0) > 0)
+        if (enet_host_service(server, &event, 1) > 0)
 		{
             switch(event.type)
             {   
@@ -141,20 +217,21 @@ int main()
 
                     // Set new player to active and associate its peer
                     Players[playerId].Active = true;
+                    Players[playerId].Id = playerId;
 
                     // valid position stops an update being sent until theyre in a good spot
                     Players[playerId].ValidPosition = false;
                     Players[playerId].Peer = event.peer;
 
                     // construct a buffer and send it through a packet
-                    PlayerPacket buffer = { 0 };
-                    buffer.Command = AcceptPlayer;
-                    buffer.Id = playerId;
+                    PlayerPacket acceptBuffer = { 0 };
+                    acceptBuffer.Command = AcceptPlayer;
+                    acceptBuffer.Id = playerId;
 
                     // create packet
-					ENetPacket* packet = enet_packet_create(&buffer, sizeof(buffer), ENET_PACKET_FLAG_RELIABLE);
+					ENetPacket* accept_player_packet = enet_packet_create(&acceptBuffer, sizeof(acceptBuffer), ENET_PACKET_FLAG_RELIABLE);
 					// send the data to the user
-					enet_peer_send(event.peer, 0, packet);
+					SendPacketToOnly(accept_player_packet, playerId, 0);
 
                     // Tell new client of other players
                     for (int i = 0; i < MAX_PLAYERS; i++){
@@ -163,41 +240,40 @@ int main()
                             continue;
                         
                         // Construct a new buffer
-                        PlayerPacket newBuffer = { 0 };
-                        newBuffer.Command = AddPlayer;
-                        newBuffer.Id = i;
-                        newBuffer.Position = Players[i].Position;
-                        newBuffer.Rotation = Players[i].Rotation;
+                        PlayerPacket otherBuffer = { 0 };
+                        otherBuffer.Command = AddPlayer;
+                        otherBuffer.Id = i;
+                        otherBuffer.Position = Players[i].Position;
+                        otherBuffer.Rotation = Players[i].Rotation;
 
                         // create a new packet and send it to new player
-                        packet = enet_packet_create(&newBuffer, sizeof(newBuffer), ENET_PACKET_FLAG_RELIABLE);
-                        enet_peer_send(event.peer, 0, packet);
+                        ENetPacket* other_player_packet  = enet_packet_create(&otherBuffer, sizeof(otherBuffer), ENET_PACKET_FLAG_RELIABLE);
+                        SendPacketToOnly(other_player_packet, playerId, 0);
                     }
 
                     // send packet to all other players that new player has joined
-                    PlayerPacket otherBuffer = { 0 };
-                    otherBuffer.Command = AddPlayer;
-                    otherBuffer.Id = playerId;
-                    otherBuffer.Position = Players[playerId].Position;
-                    otherBuffer.Rotation = Players[playerId].Rotation;
-                    packet = enet_packet_create(&otherBuffer, sizeof(otherBuffer), ENET_PACKET_FLAG_RELIABLE);
-                    SendToAllBut(packet, playerId);
+                    PlayerPacket allOtherBuffer = { 0 };
+                    allOtherBuffer.Command = AddPlayer;
+                    allOtherBuffer.Id = playerId;
+                    allOtherBuffer.Position = Players[playerId].Position;
+                    allOtherBuffer.Rotation = Players[playerId].Rotation;
+                    ENetPacket* other_players_packet = enet_packet_create(&allOtherBuffer, sizeof(allOtherBuffer), ENET_PACKET_FLAG_RELIABLE);
+                    SendPacketToAllBut(other_players_packet, playerId, 0);
+
+                    // Spawn new asteroids around new player
+                    SpawnAsteroidsAroundPlayer(&Players[playerId], 70);
 
                     // send new player info about all asteroids
-                    for (AsteroidInfo asteroid : Asteroids)
-                    {
-                        AsteroidPacket buffer = { 0 };
-                        buffer.Command = AddAsteroid;
-                        buffer.Id = asteroid.Id;
-                        buffer.Position = asteroid.Position;
-                        buffer.Rotation = asteroid.Rotation;
-
-                        packet = enet_packet_create(&buffer, sizeof(buffer), ENET_PACKET_FLAG_RELIABLE);
-                        enet_peer_send(event.peer, 0, packet);
-                    }
+                    AsteroidPacket asteroid_buffer = { 0 };
+                    asteroid_buffer.Command = AddAsteroid;
+                    memcpy(asteroid_buffer.AllAsteroids, Asteroids, sizeof(Asteroids));
+                    asteroid_buffer.AsteroidCount = AsteroidAmount;
+                    ENetPacket* asteroid_packet = enet_packet_create(&asteroid_buffer, sizeof(asteroid_buffer), ENET_PACKET_FLAG_RELIABLE);
+                    SendPacketToOnly(asteroid_packet, playerId, 1);
 
                     break;
                 }
+                
                 case ENET_EVENT_TYPE_RECEIVE:
                 {
                     int playerId = GetPlayerId(event.peer);
@@ -236,9 +312,9 @@ int main()
                         updatePlayerPacket.Rotation = Players[playerId].Rotation;
                     
                         // create packet
-                        ENetPacket* packet = enet_packet_create(&updatePlayerPacket, sizeof(updatePlayerPacket), ENET_PACKET_FLAG_RELIABLE);
+                        ENetPacket* packet = enet_packet_create(&updatePlayerPacket, sizeof(updatePlayerPacket), 0);
                         // send data to all users besides the usser
-                        SendToAllBut(packet, playerId);
+                        SendPacketToAllBut(packet, playerId, 0);
                     }
 
                     enet_packet_destroy(event.packet);
@@ -265,9 +341,9 @@ int main()
                     removePlayerPacket.Id = playerId;
 
                     // create packet
-                    ENetPacket* packet = enet_packet_create(&removePlayerPacket, sizeof(removePlayerPacket), ENET_PACKET_FLAG_RELIABLE);
+                    ENetPacket* remove_player_packet = enet_packet_create(&removePlayerPacket, sizeof(removePlayerPacket), ENET_PACKET_FLAG_RELIABLE);
                     // send data to all users
-                    SendToAllBut(packet, -1);
+                    SendPacketToAllBut(remove_player_packet, -1, 0);
 
                     break;
                 }

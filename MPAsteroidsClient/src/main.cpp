@@ -48,6 +48,7 @@ int main()
         // -------------
         world.Update();
         NetUpdate(GetTime(), GetFrameTime());
+        world.CheckCollisions();
 
         UpdateCameraCustom(&camera, &world.PlayerShip);
 

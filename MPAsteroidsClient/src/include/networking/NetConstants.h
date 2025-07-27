@@ -1,13 +1,19 @@
 #pragma once
 
+
+
 #include "../raylib/raymath.h"
 
+
+
 #define MAX_PLAYERS 5
+#define MAX_ASTEROIDS 64
+#define MAX_ASTEROID_DIST 30.0f
 
-#define SCREEN_WIDTH 1280;
-#define SCREEN_HEIGHT 720;
+#define SCREEN_WIDTH 1280
+#define SCREEN_HEIGHT 720
 
-#define SERVER_PORT 25665;
+#define SERVER_PORT 25665
 
 enum NetworkCommands
 {
@@ -21,6 +27,7 @@ enum NetworkCommands
 };
 
 #pragma pack(push, 1)
+
 struct PlayerPacket
 {
     int Command;
@@ -30,11 +37,18 @@ struct PlayerPacket
     Matrix Rotation;
 };
 
-struct AsteroidPacket
+struct AsteroidInfo
 {
-    int Command;
-    int Id;
+    bool Active = false;
     Vector3 Position;
+    Vector3 Velocity;
     Matrix Rotation;
+};
+
+struct AsteroidPacket
+{   
+    int Command;
+    AsteroidInfo AllAsteroids[MAX_ASTEROIDS];
+    int AsteroidCount;
 };
 #pragma pack(pop)

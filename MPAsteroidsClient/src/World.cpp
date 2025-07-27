@@ -40,6 +40,7 @@ void World::DrawModels()
 
     PlayerShip.Draw();
 
+    // draw player models
     for (int i = 0; i < MAX_PLAYERS; i++)
     {
         Vector3 pos = { 0.0f, 0.0f, 0.0f };
@@ -50,7 +51,8 @@ void World::DrawModels()
         }
     }
 
-    for (int i = 0; i < GetMaxAsteroids(); i++)
+    // Draw asteroid models
+    for(int i = 0; i < GetMaxAsteroids(); i++)
     {
         Vector3 pos = { 0.0f, 0.0f, 0.0f };
         Matrix rot = MatrixIdentity();
@@ -59,6 +61,31 @@ void World::DrawModels()
             Models::Draw(Models::AsteroidModel, pos, rot);
         }
     }
+}
+
+void World::CheckCollisions()
+{
+    // Calculate bounding boxes for asteroids
+    for(int i = 0; i < GetMaxAsteroids(); i++)
+    {
+        Vector3 pos = { 0.0f, 0.0f, 0.0f };
+        Matrix rot = MatrixIdentity();
+        if(GetAsteroidSpatial(i, &pos, &rot))
+        {   
+            AsteroidBoundingBoxes[i] = Models::GetWorldBoundingBox(Models::AsteroidBoxLocal, pos, rot);
+        }
+    }
+
+
+    BoundingBox PlayerBox = Models::GetWorldBoundingBox(Models::ShipBoxLocal, PlayerShip.Position, PlayerShip.Rotation);
+    for(int i = 0; i < GetMaxAsteroids(); i++)
+    {
+        if(CheckCollisionBoxes(PlayerBox, AsteroidBoundingBoxes[i]))
+        {
+            PlayerShip.Respawn();
+        }
+    }
+    
 }
 
 void World::DrawUI(Camera camera)
