@@ -140,22 +140,36 @@ bool GetPlayerSpatial(int id, Vector3* pos, Matrix* rot)
     return true;
 }
 
-
-void HandleAddAsteroid(AsteroidPacket packet)
+void HandleAddAsteroid(AsteroidInfoPacket packet)
 {
-    //memcpy(Asteroids, packet.AllAsteroids, sizeof(packet.AllAsteroids));
     for (int i = 0; i < packet.AsteroidCount && i < MAX_ASTEROIDS; i++) {
         Asteroids[i] = packet.AllAsteroids[i];
     }
     AsteroidAmount = packet.AsteroidCount;
 }
 
-void HandleUpdateAsteroid(AsteroidPacket packet)
+void HandleUpdateAsteroid(AsteroidInfoPacket packet)
 {
     for (int i = 0; i < packet.AsteroidCount && i < MAX_ASTEROIDS; i++) {
         Asteroids[i] = packet.AllAsteroids[i];
     }
     AsteroidAmount = packet.AsteroidCount;
+}
+
+void HandleDestroyAsteroid(int playerIdx, int asteroidIdx)
+{
+    printf("%i destroyed\n", asteroidIdx);
+    // create buffer
+    AsteroidDestroyPacket buffer = { 0 };
+    buffer.Command = DestroyAsteroid;
+    buffer.PlayerID = playerIdx;
+    buffer.AsteroidID = asteroidIdx;
+
+    // create packet
+    ENetPacket* packet = enet_packet_create(&buffer, sizeof(buffer), ENET_PACKET_FLAG_RELIABLE);
+    
+    // send the data to the user
+    enet_peer_send(server, 0, packet);
 }
 
 bool GetAsteroidSpatial(int id, Vector3* pos, Matrix* rot)
@@ -194,7 +208,7 @@ void NetUpdate(double now, float delta)
 
         // create packet
         ENetPacket* packet = enet_packet_create(&buffer, sizeof(buffer), ENET_PACKET_FLAG_RELIABLE);
-        // send the data to the user
+        // send the data to the server
         enet_peer_send(server, 0, packet);
 
         lastInputSend = now;
@@ -218,7 +232,7 @@ void NetUpdate(double now, float delta)
 				}
 
                 if (event.packet->dataLength == sizeof(PlayerPacket))
-                {
+                {   
                     // Recieve our packet sent from our players
                     PlayerPacket recieved;
                     memcpy(&recieved, event.packet->data, sizeof(PlayerPacket));
@@ -262,11 +276,11 @@ void NetUpdate(double now, float delta)
                         players[localPlayerId].Position = (Vector3){ 0.0f, 0.0f, 0.0f };
                     }
                 }
-                else if (event.packet->dataLength == sizeof(AsteroidPacket))
+                else if (event.packet->dataLength == sizeof(AsteroidInfoPacket))
                 {
                     // Recieve our packet sent from our players
-                    AsteroidPacket recieved;
-                    memcpy(&recieved, event.packet->data, sizeof(AsteroidPacket));
+                    AsteroidInfoPacket recieved;
+                    memcpy(&recieved, event.packet->data, sizeof(AsteroidInfoPacket));
 
                     switch(recieved.Command)
                     {

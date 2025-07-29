@@ -27,6 +27,6 @@ public:
     const Vector3 Left = (Vector3){ 0.0f, 1.0f, 0.0f };
     const Vector3 Right = (Vector3){ 0.0f, -1.0f, 0.0f };
 
-    virtual void Update();
-    inline virtual void Draw() const {};
+    virtual void Update(double delta);
+    virtual void Draw();
 };

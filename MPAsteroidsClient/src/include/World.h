@@ -14,9 +14,14 @@ public:
 
     void Reset();
 
-    void Update();
+    void Update(double delta);
     void DrawModels();
-    void CheckCollisions();
+    void DrawPlayerModels();
+    void DrawAsteroidModels();
+    void DrawShipLaser();
+    void CreateAsteroidCollision();
+    void CheckShipCollisions();
+    void CheckLaserCollisions();
     void DrawUI(Camera camera);
 
     Player PlayerShip;

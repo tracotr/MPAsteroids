@@ -1,11 +1,24 @@
 #include "include/Player.h"
 #include "include/Models.h"
+#include <iostream>
 
-
-
-
-void Player::Update()
+void Player::Update(double delta)
 {   
+    // update laser
+    laserCooldown += delta;
+    laserCooldown = Clamp(laserCooldown, 0.0, LASER_COOLDOWN_DURATION);
+
+    // Shooting controls
+    // ----------------------
+    if (IsKeyDown(KEY_SPACE))
+    {
+        if(laserCooldown >= LASER_COOLDOWN_DURATION)
+        {
+            laserCooldown = 0;
+        }
+        isFiring = (laserCooldown == 0) ? true: false;
+    }
+
     // Rotation controls
     // ----------------------
     // Pitch
@@ -51,8 +64,9 @@ void Player::Update()
     if (IsKeyDown(KEY_Y)) Reset();
 }
 
-void Player::Draw() const
+void Player::Draw()
 {
+    // draw model
     Models::Draw(Models::ShipModel, this->Position, this->Rotation);
 }
 
@@ -67,4 +81,9 @@ void Player::Respawn()
     Position = Vector3{ 0.0f, 0.0f, 0.0f };
     Rotation = MatrixIdentity();
     Velocity = Vector3{ 0.0f, 0.0f, 0.0f };
+}
+
+Vector3 Player::GetForwardVector()
+{
+    return Vector3Normalize(Vector3Transform((Vector3){ 0, 0, -1 }, this->Rotation));
 }

@@ -69,6 +69,16 @@ int GetPlayerId(ENetPeer* peer)
 	return -1;
 }
 
+AsteroidInfo CreateAsteroid()
+{
+    AsteroidInfo newAsteroid = { 0 };
+    newAsteroid.Position = (Vector3){ rdist(gen), rdist(gen), rdist(gen) };
+    newAsteroid.Velocity = (Vector3){ rvelocity(gen) , rvelocity(gen), rvelocity(gen) };
+    newAsteroid.Rotation = MatrixIdentity();
+    return newAsteroid;
+}
+
+
 void SpawnAsteroidsAroundPlayer(PlayerInfo* player, int amount)
 {
     // spawn amount of asteroids 
@@ -79,14 +89,12 @@ void SpawnAsteroidsAroundPlayer(PlayerInfo* player, int amount)
             break;
         }
 
-        AsteroidInfo newAsteroid;
-        newAsteroid.Position = (Vector3){ rdist(gen), rdist(gen), rdist(gen) };
-        newAsteroid.Velocity = (Vector3){ rvelocity(gen) , rvelocity(gen), rvelocity(gen) };
-        newAsteroid.Rotation = MatrixIdentity();
+        AsteroidInfo newAsteroid = CreateAsteroid();
         Asteroids[AsteroidAmount] = newAsteroid;
         AsteroidAmount += 1;
     }
 }
+
 
 Vector3 GetNearestPlayerPosition(Vector3 asteroidPos)
 {
@@ -141,7 +149,7 @@ void UpdateAsteroids(double delta)
     }
 
     // send position to players
-    AsteroidPacket buffer = { 0 };
+    AsteroidInfoPacket buffer = { 0 };
     buffer.Command = UpdateAsteroid;
     memcpy(buffer.AllAsteroids, Asteroids, sizeof(Asteroids));
     buffer.AsteroidCount = AsteroidAmount;
@@ -264,7 +272,7 @@ int main()
                     SpawnAsteroidsAroundPlayer(&Players[playerId], 70);
 
                     // send new player info about all asteroids
-                    AsteroidPacket asteroid_buffer = { 0 };
+                    AsteroidInfoPacket asteroid_buffer = { 0 };
                     asteroid_buffer.Command = AddAsteroid;
                     memcpy(asteroid_buffer.AllAsteroids, Asteroids, sizeof(Asteroids));
                     asteroid_buffer.AsteroidCount = AsteroidAmount;
@@ -276,45 +284,55 @@ int main()
                 
                 case ENET_EVENT_TYPE_RECEIVE:
                 {
-                    int playerId = GetPlayerId(event.peer);
-
-                    // boot event if not in our list of active players
-                    if (playerId == -1)
-					{
-						enet_peer_disconnect(event.peer, 0);
-						break;
-					}
-                    
-                    PlayerPacket recieved;
-                    memcpy(&recieved, event.packet->data, sizeof(PlayerPacket));
-
-                    NetworkCommands command = (NetworkCommands)recieved.Command;
-
-                    if (command == UpdateInput)
+                    if(event.packet->dataLength == sizeof(PlayerPacket))
                     {
-                        Players[playerId].Position = recieved.Position;
-                        Players[playerId].Rotation = recieved.Rotation;
-                    
-                        PlayerPacket updatePlayerPacket;
-                        updatePlayerPacket.Command = UpdatePlayer;
-                    
-                        if (!Players[playerId].ValidPosition)
+                        int playerId = GetPlayerId(event.peer);
+
+                        // boot event if not in our list of active players
+                        if (playerId == -1)
                         {
-                            updatePlayerPacket.Command = UpdatePlayer;
+                            enet_peer_disconnect(event.peer, 0);
+                            break;
                         }
-                    
-                        // if theyre good, can send as regular updates
-                        Players[playerId].ValidPosition = true;
                         
-                        // update our new packet with correct info
-                        updatePlayerPacket.Id = playerId;
-                        updatePlayerPacket.Position = Players[playerId].Position;
-                        updatePlayerPacket.Rotation = Players[playerId].Rotation;
-                    
-                        // create packet
-                        ENetPacket* packet = enet_packet_create(&updatePlayerPacket, sizeof(updatePlayerPacket), 0);
-                        // send data to all users besides the usser
-                        SendPacketToAllBut(packet, playerId, 0);
+                        PlayerPacket recieved;
+                        memcpy(&recieved, event.packet->data, sizeof(PlayerPacket));
+
+                        NetworkCommands command = (NetworkCommands)recieved.Command;
+
+                        if (command == UpdateInput)
+                        {
+                            Players[playerId].Position = recieved.Position;
+                            Players[playerId].Rotation = recieved.Rotation;
+                        
+                            PlayerPacket updatePlayerPacket;
+                            updatePlayerPacket.Command = UpdatePlayer;
+                        
+                            if (!Players[playerId].ValidPosition)
+                            {
+                                updatePlayerPacket.Command = UpdatePlayer;
+                            }
+                        
+                            // if theyre good, can send as regular updates
+                            Players[playerId].ValidPosition = true;
+                            
+                            // update our new packet with correct info
+                            updatePlayerPacket.Id = playerId;
+                            updatePlayerPacket.Position = Players[playerId].Position;
+                            updatePlayerPacket.Rotation = Players[playerId].Rotation;
+                        
+                            // create packet
+                            ENetPacket* packet = enet_packet_create(&updatePlayerPacket, sizeof(updatePlayerPacket), 0);
+                            // send data to all users besides the usser
+                            SendPacketToAllBut(packet, playerId, 0);
+                        }
+                    }
+                    else if(event.packet->dataLength == sizeof(AsteroidDestroyPacket))
+                    {
+                        AsteroidDestroyPacket recieved;
+                        memcpy(&recieved, event.packet->data, sizeof(AsteroidDestroyPacket));
+                        printf("%i, %i", recieved.AsteroidID, recieved.PlayerID);
+                        Asteroids[recieved.AsteroidID] = CreateAsteroid();
                     }
 
                     enet_packet_destroy(event.packet);

@@ -46,9 +46,8 @@ int main()
     {
         // Updating
         // -------------
-        world.Update();
+        world.Update(GetFrameTime());
         NetUpdate(GetTime(), GetFrameTime());
-        world.CheckCollisions();
 
         UpdateCameraCustom(&camera, &world.PlayerShip);
 
@@ -65,10 +64,6 @@ int main()
             EndMode3D();
 
             world.DrawUI(camera);
-
-            DrawText(TextFormat("Velocity: %03.03f", Vector3LengthSqr(world.PlayerShip.Velocity)), 20, 20, 20, RAYWHITE);
-            DrawText(TextFormat("Position: %03.03f, %03.03f, %03.03f", camera.target.x, camera.target.y, camera.target.z), 20, 40, 20, RAYWHITE);
-            DrawText(TextFormat("ID: %i", GetLocalPlayerId()), 20, 60, 20, RAYWHITE);
 
         EndDrawing();
     }

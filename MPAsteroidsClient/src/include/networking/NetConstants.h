@@ -1,10 +1,6 @@
 #pragma once
 
-
-
 #include "../raylib/raymath.h"
-
-
 
 #define MAX_PLAYERS 5
 #define MAX_ASTEROIDS 64
@@ -24,6 +20,7 @@ enum NetworkCommands
     UpdateInput = 5,
     AddAsteroid = 6,
     UpdateAsteroid = 7,
+    DestroyAsteroid = 8,
 };
 
 #pragma pack(push, 1)
@@ -45,10 +42,17 @@ struct AsteroidInfo
     Matrix Rotation;
 };
 
-struct AsteroidPacket
+struct AsteroidInfoPacket
 {   
     int Command;
     AsteroidInfo AllAsteroids[MAX_ASTEROIDS];
     int AsteroidCount;
+};
+
+struct AsteroidDestroyPacket
+{
+    int Command;
+    int PlayerID;
+    int AsteroidID;
 };
 #pragma pack(pop)
