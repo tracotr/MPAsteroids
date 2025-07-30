@@ -310,8 +310,10 @@ void NetUpdate(double now, float delta)
                 enet_deinitialize();
 
                 server = NULL;
-                localPlayerId = -1;  
+                localPlayerId = -1;
+                break;
             }
+            case ENET_EVENT_TYPE_NONE:
             break;
         }
     }

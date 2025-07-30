@@ -2006,6 +2006,17 @@ RMAPI float16 MatrixToFloatV(Matrix mat)
     return result;
 }
 
+// adding this so I can compare matrixes
+RMAPI MatrixEquals(const Matrix& a, const Matrix& b) {
+    return FloatEquals(a.m0, a.m0) && FloatEquals(a.m1, b.m1) &&
+           FloatEquals(a.m4, b.m4) && FloatEquals(a.m5, b.m5) &&
+           FloatEquals(a.m6, b.m6) && FloatEquals(a.m7, b.m7) &&
+           FloatEquals(a.m8, b.m8) && FloatEquals(a.m9, b.m9) &&
+           FloatEquals(a.m10, b.m10) && FloatEquals(a.m11, b.m11) &&
+           FloatEquals(a.m12, b.m12) && FloatEquals(a.m13, b.m13) &&
+           FloatEquals(a.m14, b.m14) && FloatEquals(a.m15, b.m15);
+}
+
 //----------------------------------------------------------------------------------
 // Module Functions Definition - Quaternion math
 //----------------------------------------------------------------------------------
