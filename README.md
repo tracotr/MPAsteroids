@@ -5,7 +5,7 @@ A simple 3D multiplayer asteroids game built in C++ using [raylib](www.raylib.co
 ## Features
 A server and a client.
 It's like somehow simpler asteroids, but 3d and multiplayer.
-![][((https://github.com/tracotr/MPAsteroidsRaylib/blob/main/Examples/example.gif)]
+![](https://github.com/tracotr/MPAsteroidsRaylib/blob/main/Examples/example.gif)
 
 ## Building
 The main way to build is to open either MPAsteroidsServer or MPAsteroidsClient in VSCode, and hit F5.
