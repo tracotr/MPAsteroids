@@ -67,7 +67,7 @@ void Player::Update(double delta)
 void Player::Draw()
 {
     // draw model
-    Models::Draw(Models::ShipModel, this->Position, this->Rotation);
+    Models::DrawModel(Models::ShipModel, this->Position, this->Rotation);
 }
 
 void Player::Reset()

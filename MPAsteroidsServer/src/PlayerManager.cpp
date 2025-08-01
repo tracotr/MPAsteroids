@@ -1,7 +1,5 @@
 #include "include/PlayerManager.h"
-#include "include/AsteroidManager.h"
-#include "include/NetworkUtil.h"
-#include <stdio.h>
+
 
 PlayerInfo PlayerManager::Players[MAX_PLAYERS]; 
 
@@ -13,13 +11,12 @@ void PlayerManager::UpdateInput(PlayerPacket* received, int playerId)
     player.Position = received->Position;
     player.Rotation = received->Rotation;
 
-
     PlayerPacket updatePlayerPacket;
-    updatePlayerPacket.Command = UpdatePlayer;
+    updatePlayerPacket.Command = NetworkCommands::UpdatePlayer;
 
     if (!player.ValidPosition)
     {
-        updatePlayerPacket.Command = UpdatePlayer;
+        updatePlayerPacket.Command = NetworkCommands::AddPlayer;
     }
 
     // if theyre good, can send as regular updates
@@ -33,7 +30,7 @@ void PlayerManager::UpdateInput(PlayerPacket* received, int playerId)
     // create packet
     ENetPacket* packet = enet_packet_create(&updatePlayerPacket, sizeof(updatePlayerPacket), 0);
     // send data to all users besides the user
-    NetworkUtil::SendPacketToAllBut(packet, playerId, 0);
+    NetworkUtil::SendPacketToAllBut(packet, Players, playerId, 0);
 }
 
 // makes a new player and returns their id
@@ -67,13 +64,13 @@ int PlayerManager::InitializeNewPlayer(ENetEvent* event)
 
     // construct a buffer and send it through a packet
     PlayerPacket acceptBuffer = { 0 };
-    acceptBuffer.Command = AcceptPlayer;
+    acceptBuffer.Command = NetworkCommands::AcceptPlayer;
     acceptBuffer.Id = playerId;
 
     // create packet
     ENetPacket* accept_player_packet = enet_packet_create(&acceptBuffer, sizeof(acceptBuffer), ENET_PACKET_FLAG_RELIABLE);
     // send the data to the user
-    NetworkUtil::SendPacketToOnly(accept_player_packet, playerId, 0);
+    NetworkUtil::SendPacketToOnly(accept_player_packet, Players, playerId, 0);
 
     // Tell new client of other players
     for (int i = 0; i < MAX_PLAYERS; i++){
@@ -83,25 +80,24 @@ int PlayerManager::InitializeNewPlayer(ENetEvent* event)
         
         // Construct a new buffer
         PlayerPacket otherBuffer = { 0 };
-        otherBuffer.Command = AddPlayer;
+        otherBuffer.Command = NetworkCommands::AddPlayer;
         otherBuffer.Id = i;
         otherBuffer.Position = Players[i].Position;
         otherBuffer.Rotation = Players[i].Rotation;
 
         // create a new packet and send it to new player
         ENetPacket* other_player_packet  = enet_packet_create(&otherBuffer, sizeof(otherBuffer), ENET_PACKET_FLAG_RELIABLE);
-        NetworkUtil::SendPacketToOnly(other_player_packet, playerId, 0);
+        NetworkUtil::SendPacketToOnly(other_player_packet, Players, playerId, 0);
     }
 
     // send packet to all other players that new player has joined
     PlayerPacket allOtherBuffer = { 0 };
-    allOtherBuffer.Command = AddPlayer;
+    allOtherBuffer.Command = NetworkCommands::AddPlayer;
     allOtherBuffer.Id = playerId;
     allOtherBuffer.Position = Players[playerId].Position;
     allOtherBuffer.Rotation = Players[playerId].Rotation;
     ENetPacket* other_players_packet = enet_packet_create(&allOtherBuffer, sizeof(allOtherBuffer), ENET_PACKET_FLAG_RELIABLE);
-    NetworkUtil::SendPacketToAllBut(other_players_packet, playerId, 0);
-
+    NetworkUtil::SendPacketToAllBut(other_players_packet, Players, playerId, 0);
 
     return playerId;
 }
@@ -115,13 +111,13 @@ void PlayerManager::DisconnectPlayer(int playerId)
     Players[playerId].Rotation = MatrixIdentity();
 
     PlayerPacket removePlayerPacket;
-    removePlayerPacket.Command = RemovePlayer;
+    removePlayerPacket.Command = NetworkCommands::RemovePlayer;
     removePlayerPacket.Id = playerId;
 
     // create packet
     ENetPacket* remove_player_packet = enet_packet_create(&removePlayerPacket, sizeof(removePlayerPacket), ENET_PACKET_FLAG_RELIABLE);
     // send data to all users
-    NetworkUtil::SendPacketToAllBut(remove_player_packet, -1, 0);
+    NetworkUtil::SendPacketToAllBut(remove_player_packet, Players, -1, 0);
 }
 
 // finds player id of peer specified

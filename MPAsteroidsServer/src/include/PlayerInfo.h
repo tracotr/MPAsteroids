@@ -1,7 +1,8 @@
 #ifndef PLAYER_INFO_H
 #define PLAYER_INFO_H
 
-#include "net_common.h"
+#include "networking/NetCommon.h"
+#include "raylib/raymath.h"
 
 struct PlayerInfo
 {

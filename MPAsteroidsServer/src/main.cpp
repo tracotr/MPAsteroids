@@ -1,44 +1,42 @@
 #define ENET_IMPLEMENTATION
-#include "include/net_common.h"
+
+#include "include/raylib/raymath.h"
 #include "include/PlayerManager.h"
 #include "include/AsteroidManager.h"
+#include "include/ScoreboardManager.h"
 #include "include/NetworkUtil.h"
+#include "include/networking/NetCommon.h"
 
-
-#include <stdio.h>
-#include <vector>
 #include <ctime>
-#include <random>
+#include <string>
 
-
-ENetAddress address = { 0 };
-ENetHost* server = { 0 };
-
+ENetAddress Address = { 0 };
+ENetHost* Server = { 0 };
 
 double GetTime()
 {
     return (double)clock() / CLOCKS_PER_SEC;
 }
 
-
 int main()
 {
     if (enet_initialize () != 0)
     {
-        printf("An error occurred while initializing ENet.\n");
+        NetworkUtil::Log("An error occurred while initializing ENet.");
         return 1;
     }
 
     PlayerManager playerManager;
     AsteroidManager asteroidManager;
+    ScoreboardManager scoreboardManager;
 
-	address.host = ENET_HOST_ANY;
-	address.port = SERVER_PORT;
+	Address.host = ENET_HOST_ANY;
+	Address.port = SERVER_PORT;
 
     // create the server host
-	server = enet_host_create(&address, MAX_PLAYERS, 2, 0, 0);
+	Server = enet_host_create(&Address, MAX_PLAYERS, 2, 0, 0);
     
-    if (server == NULL) 
+    if (Server == NULL) 
     {
         NetworkUtil::Log("An error occurred while trying to create an ENet server host.");
         return 1;
@@ -56,13 +54,13 @@ int main()
         // Only update asteroid movement if enough time has passed
         if (delta >= asteroidManager.ASTEROID_TICK_INTERVAL)
         {
-            asteroidManager.UpdateAsteroids(playerManager.Players, delta);
+            asteroidManager.UpdateAsteroids(playerManager.GetPlayers(), delta);
             asteroidManager.lastAsteroidUpdateTime = now;
         }
 
         // Check for events (updates from clients)
         ENetEvent event = {};
-        if (enet_host_service(server, &event, 1) > 0)
+        if (enet_host_service(Server, &event, 1) > 0)
 		{
             switch(event.type)
             {   
@@ -76,18 +74,16 @@ int main()
                     }
 
                     // Spawn new asteroids 
-                    int asteroidAmount = 32;
+                    int asteroidAmount = 10;
                     asteroidManager.SpawnAsteroids(asteroidAmount);
 
-                    // send new player info about all asteroids
-                    AsteroidInfoPacket asteroid_buffer = { 0 };
-                    asteroid_buffer.Command = AddAsteroid;
-                    AsteroidInfo (&curAsteroids)[MAX_ASTEROIDS] = asteroidManager.GetAsteroids();
-
-                    memcpy(asteroid_buffer.AllAsteroids, curAsteroids, sizeof(curAsteroids));
-                    asteroid_buffer.AsteroidCount = asteroidManager.GetAsteroidAmount();
-                    ENetPacket* asteroid_packet = enet_packet_create(&asteroid_buffer, sizeof(asteroid_buffer), ENET_PACKET_FLAG_RELIABLE);
-                    NetworkUtil::SendPacketToOnly(asteroid_packet, playerId, 1);
+                    // send player current scoreboard data
+                    ScoreboardPacket scoreboardBuffer;
+                    scoreboardBuffer.Command = UpdateScoreboard;
+                    memcpy(scoreboardBuffer.Scoreboard, scoreboardManager.GetScoreboard(), sizeof(scoreboardManager.GetScoreboard()));
+                    // create packet and send
+                    ENetPacket* packet = enet_packet_create(&scoreboardBuffer, sizeof(scoreboardBuffer), 0);
+                    NetworkUtil::SendPacketToAllBut(packet, playerManager.GetPlayers(), -1, 1);
                     break;
                 }
                 
@@ -109,7 +105,7 @@ int main()
 
                         NetworkCommands command = (NetworkCommands)received.Command;
 
-                        if (command == UpdateInput)
+                        if(command == NetworkCommands::UpdateInput)
                         {
                             playerManager.UpdateInput(&received, playerId);
                         }
@@ -118,7 +114,27 @@ int main()
                     {
                         AsteroidDestroyPacket received;
                         memcpy(&received, event.packet->data, sizeof(AsteroidDestroyPacket));
-                        asteroidManager.RespawnAsteroid(received.AsteroidID);
+
+                        NetworkCommands command = (NetworkCommands)received.Command;
+
+                        if(command == NetworkCommands::DestroyAsteroid)
+                        {
+                            asteroidManager.RespawnAsteroid(received.AsteroidID);
+                            scoreboardManager.AddScoreId(received.PlayerID, 5);
+                            scoreboardManager.UpdateScoreboard(playerManager.GetPlayers());
+                        }
+                    }
+                    else if(event.packet->dataLength == sizeof(ScoreboardPacket))
+                    {
+                        ScoreboardPacket received;
+                        memcpy(&received, event.packet->data, sizeof(ScoreboardPacket));
+
+                        NetworkCommands command = (NetworkCommands)received.Command;
+                        if(command == NetworkCommands::ResetScoreboardId)
+                        {
+                            scoreboardManager.ResetScoreId(received.Id);
+                            scoreboardManager.UpdateScoreboard(playerManager.GetPlayers());
+                        }
                     }
 
                     enet_packet_destroy(event.packet);
@@ -127,16 +143,17 @@ int main()
                 case ENET_EVENT_TYPE_DISCONNECT_TIMEOUT:
                 case ENET_EVENT_TYPE_DISCONNECT:
                 {
-                    printf("player disconnected\n");
-
                     int playerId = playerManager.GetPlayerId(event.peer);
+                    
                     if (playerId == -1)
                     {
                         break;
                     }
 
-                    playerManager.DisconnectPlayer(playerId);
+                    NetworkUtil::Log(std::to_string(playerId) + " has disconnected.");
 
+                    playerManager.DisconnectPlayer(playerId);
+                    scoreboardManager.ResetScoreId(playerId);
                     break;
                 }
                 case ENET_EVENT_TYPE_NONE:
@@ -145,7 +162,7 @@ int main()
         }
     }
     
-    enet_host_destroy(server);
+    enet_host_destroy(Server);
     enet_deinitialize();
 
     return 0;

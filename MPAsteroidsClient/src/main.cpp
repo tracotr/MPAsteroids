@@ -1,13 +1,10 @@
 #include "include/raylib/raylib.h"
 #include "include/raylib/rcamera.h"
-#include "include/raylib/raymath.h"
 
 #include "include/Game.h"
 #include "include/Models.h"
 #include "include/World.h"
 #include "include/Player.h"
-
-#include "include/NetClient.h"
 #include "include/networking/NetConstants.h"
 
 #include <stdio.h>
@@ -40,14 +37,15 @@ int main()
     World& world = World::Create();
     world.Reset();
 
-    NetConnect("127.0.0.1");
+
+    
 
     while (!WindowShouldClose())
     {
         // Updating
         // -------------
         world.Update(GetFrameTime());
-        NetUpdate(GetTime(), GetFrameTime());
+        
 
         UpdateCameraCustom(&camera, &world.PlayerShip);
 
@@ -59,7 +57,7 @@ int main()
             
             BeginMode3D(camera);
           
-                world.DrawModels();
+                world.Draw();
 
             EndMode3D();
 

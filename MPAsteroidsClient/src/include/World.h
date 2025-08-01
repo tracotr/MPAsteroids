@@ -2,6 +2,9 @@
 
 #include "Entity.h"
 #include "Player.h"
+#include "Models.h"
+#include "NetClient.h"
+
 #include "networking/NetConstants.h"
 
 class World
@@ -15,15 +18,18 @@ public:
     void Reset();
 
     void Update(double delta);
-    void DrawModels();
+    void Draw();
     void DrawPlayerModels();
     void DrawAsteroidModels();
     void DrawShipLaser();
-    void CreateAsteroidCollision();
-    void CheckShipCollisions();
-    void CheckLaserCollisions();
     void DrawUI(Camera camera);
+    void CreateAsteroidCollision();
+    void CheckShipCollisions(BoundingBox asteroidBox);
+    void CheckLaserCollisions(BoundingBox asteroidBox, int asteroidId);
+    void CheckCollisions();
 
     Player PlayerShip;
     BoundingBox AsteroidBoundingBoxes[MAX_ASTEROIDS];
+
+    NetClient NetClient;
 };

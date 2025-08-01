@@ -1,18 +1,14 @@
 #include "include/World.h"
-#include "include/Models.h"
-
-#include "include/NetClient.h"
-#include "include/networking/NetConstants.h"
-
-#include <stdio.h>
 
 World* World::Instance = nullptr;
 
 World& World::Create()
 {
     if (!Instance)
+    {
         Instance = new World();
-
+    }
+    
     return *Instance;
 }
 
@@ -25,20 +21,23 @@ void World::Destroy()
 
 void World::Reset()
 {
+    NetClient.NetConnect("127.0.0.1");
     PlayerShip.Reset();
 }
 
 void World::Update(double delta)
 {
     PlayerShip.Update(delta);
-    UpdateLocalPlayer(PlayerShip.Position, PlayerShip.Rotation);
+    
+    NetClient.UpdateLocalPlayer(PlayerShip.Position, PlayerShip.Rotation);
+    NetClient.NetUpdate(GetTime(), GetFrameTime());
+
 
     CreateAsteroidCollision();
-    CheckShipCollisions();
-    CheckLaserCollisions();
+    CheckCollisions();
 }
 
-void World::DrawModels()
+void World::Draw()
 {
     Models::DrawSkybox();
 
@@ -48,6 +47,11 @@ void World::DrawModels()
     DrawShipLaser();
 }
 
+void World::DrawUI(Camera camera)
+{
+    Models::DrawUI(camera, PlayerShip.Velocity, PlayerShip.Position, NetClient.GetLocalPlayerId(), NetClient.GetScoreboard());
+}
+
 void World::DrawPlayerModels()
 {
     // draw other player models
@@ -55,9 +59,9 @@ void World::DrawPlayerModels()
     {
         Vector3 pos = { 0.0f, 0.0f, 0.0f };
         Matrix rot = MatrixIdentity();
-        if(GetPlayerSpatial(i, &pos, &rot))
+        if(NetClient.GetPlayerSpatial(i, &pos, &rot))
         {   
-            Models::Draw(Models::ShipModel, pos, rot);
+            Models::DrawModel(Models::ShipModel, pos, rot);
         }
     }
 }
@@ -65,13 +69,13 @@ void World::DrawPlayerModels()
 void World::DrawAsteroidModels()
 {
     // Draw asteroid models
-    for(int i = 0; i < GetMaxAsteroids(); i++)
+    for(int i = 0; i < NetClient.GetMaxAsteroids(); i++)
     {
         Vector3 pos = { 0.0f, 0.0f, 0.0f };
         Matrix rot = MatrixIdentity();
-        if(GetAsteroidSpatial(i, &pos, &rot))
+        if(NetClient.GetAsteroidSpatial(i, &pos, &rot))
         {   
-            Models::Draw(Models::AsteroidModel, pos, rot);
+            Models::DrawModel(Models::AsteroidModel, pos, rot);
         }
     }
 }
@@ -83,7 +87,7 @@ void World::DrawShipLaser()
 
     double distance = 50.0f;
 
-    for(int i = 0; i < GetMaxAsteroids(); i++)
+    for(int i = 0; i < NetClient.GetMaxAsteroids(); i++)
     {
         Ray ray = { start, direction };
         RayCollision hit = GetRayCollisionBox(ray, AsteroidBoundingBoxes[i]);
@@ -99,35 +103,31 @@ void World::DrawShipLaser()
 
 void World::CreateAsteroidCollision()
 {
-    for(int i = 0; i < GetMaxAsteroids(); i++)
+    for(int i = 0; i < NetClient.GetMaxAsteroids(); i++)
     {
         // calculating bounding boxes
         Vector3 pos = { 0.0f, 0.0f, 0.0f };
         Matrix rot = MatrixIdentity();
-        if(GetAsteroidSpatial(i, &pos, &rot))
+        if(NetClient.GetAsteroidSpatial(i, &pos, &rot))
         {   
             AsteroidBoundingBoxes[i] = Models::GetWorldBoundingBox(Models::AsteroidBoxLocal, pos, rot);
         }
     }
 }
 
-void World::CheckShipCollisions()
+void World::CheckShipCollisions(BoundingBox asteroidBox)
 {
     BoundingBox PlayerBox = Models::GetWorldBoundingBox(Models::ShipBoxLocal, PlayerShip.Position, PlayerShip.Rotation);
-    // Calculate bounding boxes for asteroids, and check collisions
-    for(int i = 0; i < GetMaxAsteroids(); i++)
+
+    // check player-asteroid collisions
+    if(CheckCollisionBoxes(PlayerBox, asteroidBox))
     {
-        // check player-asteroid collisions
-        if(CheckCollisionBoxes(PlayerBox, AsteroidBoundingBoxes[i]))
-        {
-            PlayerShip.Respawn();
-            printf("Player collision asteroid %i\n", i);
-            break;
-        }
+        PlayerShip.Respawn();
+        NetClient.HandlePlayerCollision();
     }
 }
 
-void World::CheckLaserCollisions()
+void World::CheckLaserCollisions(BoundingBox asteroidBox, int asteroidId)
 {
     if(!PlayerShip.isFiring){
         return;
@@ -137,21 +137,21 @@ void World::CheckLaserCollisions()
     Vector3 direction = PlayerShip.GetForwardVector();
     Ray laser = { start, direction };
     // Calculate bounding boxes for asteroids, and check collisions
-    for(int i = 0; i < GetMaxAsteroids(); i++)
+
+    // check player-asteroid collisions
+    if(GetRayCollisionBox(laser, asteroidBox).hit)
     {
-        // check player-asteroid collisions
-        if(GetRayCollisionBox(laser, AsteroidBoundingBoxes[i]).hit)
-        {
-            HandleDestroyAsteroid(GetLocalPlayerId(), i);
-            PlayerShip.isFiring = false;
-            break;
-        }
+        NetClient.HandleDestroyAsteroid(NetClient.GetLocalPlayerId(), asteroidId);
+        PlayerShip.isFiring = false;
     }
 }
 
-void World::DrawUI(Camera camera)
+void World::CheckCollisions()
 {
-    DrawText(TextFormat("Velocity: %03.03f", Vector3LengthSqr(PlayerShip.Velocity)), 20, 20, 20, RAYWHITE);
-    DrawText(TextFormat("Position: %03.03f, %03.03f, %03.03f", PlayerShip.Position.x, PlayerShip.Position.y, PlayerShip.Position.z), 20, 40, 20, RAYWHITE);
-    DrawText(TextFormat("ID: %i", GetLocalPlayerId()), 20, 60, 20, RAYWHITE);
+    for(int i = 0; i < NetClient.GetMaxAsteroids(); i++)
+    {
+        CheckShipCollisions(AsteroidBoundingBoxes[i]);
+        CheckLaserCollisions(AsteroidBoundingBoxes[i], i);
+    }
 }
+

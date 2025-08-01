@@ -4,6 +4,9 @@
 #include "raylib/raymath.h"
 #include "raylib/rlgl.h"
 
+#include "networking/NetConstants.h"
+
+#include <float.h>
 
 namespace Models
 {
@@ -18,7 +21,8 @@ namespace Models
     void Init();
 
     // draw models
-    void Draw(Model model, const Vector3& position, const Matrix& rotation);
+    void DrawModel(Model model, const Vector3& position, const Matrix& rotation);
     void DrawSkybox();
+    void DrawUI(Camera camera, Vector3 velocity, Vector3 position, int id, int (&scoreboard)[MAX_PLAYERS]);
     BoundingBox GetWorldBoundingBox(BoundingBox localBox, Vector3 position, Matrix rotation);
 }

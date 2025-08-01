@@ -1,7 +1,6 @@
 #include "include/Models.h"
 
-#include <stdio.h>
-#include <float.h>
+
 
 namespace Models
 {
@@ -41,7 +40,7 @@ namespace Models
         AsteroidBoxLocal = GetModelBoundingBox(AsteroidModel);
     }
 
-    void Draw(Model model, const Vector3& position, const Matrix& rotation)
+    void DrawModel(Model model, const Vector3& position, const Matrix& rotation)
     {
         // Rotate model off pitch, yaw, and roll
         model.transform = rotation;
@@ -56,6 +55,18 @@ namespace Models
             DrawModel(Models::Skybox, (Vector3){ 0.0f, 0.0f, 0.0f }, 1.0f, WHITE);
         rlEnableBackfaceCulling();
         rlEnableDepthMask();
+    }
+
+    void DrawUI(Camera camera, Vector3 velocity, Vector3 position, int id, int (&scoreboard)[MAX_PLAYERS])
+    {
+        DrawText(TextFormat("Velocity: %03.03f", Vector3LengthSqr(velocity)), 20, 20, 20, RAYWHITE);
+        DrawText(TextFormat("Position: %03.03f, %03.03f, %03.03f", position.x, position.y, position.z), 20, 40, 20, RAYWHITE);
+        DrawText(TextFormat("ID: %i", id), 20, 60, 20, RAYWHITE);
+
+        for(int i = 0; i < MAX_PLAYERS; i++)
+        {
+            DrawText(TextFormat("%i: %i", i, scoreboard[i]), GetScreenWidth() - 100, 20*i, 20, RAYWHITE);
+        }
     }
 
     BoundingBox GetWorldBoundingBox(BoundingBox localBox, Vector3 position, Matrix rotation)

@@ -1,6 +1,8 @@
 #pragma once
-#include "net_common.h"
+#include "networking/NetCommon.h"
+#include "raylib/raymath.h"
 #include "PlayerInfo.h"
+#include "NetworkUtil.h"
 #include <random>
 
 class AsteroidManager
@@ -15,13 +17,10 @@ private:
     float RandBetween(float min, float max);
 
 public:
-   
-    
     double lastAsteroidUpdateTime = 0;
-    const double ASTEROID_TICK_INTERVAL = 1.0f / 30.0f; 
+    const double ASTEROID_TICK_INTERVAL = 1.0f / 20.0f; 
 
     void UpdateAsteroids(PlayerInfo (&players)[MAX_PLAYERS], double delta);
-    bool GetAsteroidSpatial(int id, Vector3* pos, Matrix* rot);
     void RespawnAsteroid(int id);
     void SpawnAsteroids(int amount);
     AsteroidInfo (&GetAsteroids())[MAX_ASTEROIDS] { return Asteroids; };

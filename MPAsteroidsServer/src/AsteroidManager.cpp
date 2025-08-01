@@ -1,5 +1,4 @@
 #include "include/AsteroidManager.h"
-#include "include/NetworkUtil.h"
 
 //  updates position of asteroid and sends to players
 void AsteroidManager::UpdateAsteroids(PlayerInfo (&players)[MAX_PLAYERS], double delta)
@@ -15,27 +14,14 @@ void AsteroidManager::UpdateAsteroids(PlayerInfo (&players)[MAX_PLAYERS], double
 
     // send position to players
     AsteroidInfoPacket buffer = { 0 };
-    buffer.Command = UpdateAsteroid;
+    buffer.Command = NetworkCommands::UpdateAsteroid;
     memcpy(buffer.AllAsteroids, Asteroids, sizeof(Asteroids));
     buffer.AsteroidCount = AsteroidAmount;
 
     // create packet
     ENetPacket* packet = enet_packet_create(&buffer, sizeof(buffer), ENET_PACKET_FLAG_UNSEQUENCED);
     // send to all connected clients
-    NetworkUtil::SendPacketToAllBut(packet, -1, 1);
-}
-
-// returns true if asteroid exists, gives pos and rot to a pointer
-bool AsteroidManager::GetAsteroidSpatial(int id, Vector3* pos, Matrix* rot)
-{
-    if(id < 0 || id >= AsteroidAmount)
-    {
-        return false;
-    }
-
-    *pos = Asteroids[id].Position;
-    *rot = Asteroids[id].Rotation;
-    return true;
+    NetworkUtil::SendPacketToAllBut(packet, players, -1, 1);
 }
 
 // creates a new asteroid with random position
