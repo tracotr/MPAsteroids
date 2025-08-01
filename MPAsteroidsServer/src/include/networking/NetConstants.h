@@ -38,9 +38,9 @@ struct PlayerPacket
 struct AsteroidInfo
 {
     bool Active = false;
-    Vector3 Position;
-    Vector3 Velocity;
-    Matrix Rotation;
+    Vector3 Position = { 0 };
+    Vector3 Velocity = { 0 };
+    Matrix Rotation = MatrixIdentity();
 };
 
 struct AsteroidInfoPacket

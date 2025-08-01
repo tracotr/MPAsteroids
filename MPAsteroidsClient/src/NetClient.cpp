@@ -12,9 +12,13 @@ void NetClient::NetConnect(const char* serverAddress)
         return;
     }
     
-    Client = enet_host_create(NULL, 1, 2, 0 ,0);
+    // create the server host
+    // channel 0: reliable packets
+    // channel 1: asteroid updates
+    // channel 2: player updates
+    Client = enet_host_create(NULL, 1, 3, 0 ,0);
 
-    if (Client == NULL) 
+    if(Client == NULL) 
     {
         printf("client not found\n");
         exit(EXIT_FAILURE);
@@ -23,9 +27,9 @@ void NetClient::NetConnect(const char* serverAddress)
     enet_address_set_host(&Address, serverAddress);
     Address.port = SERVER_PORT;
 
-    Server = enet_host_connect(Client, &Address, 2, 0);
+    Server = enet_host_connect(Client, &Address, 3, 0);
 
-    if (Server == NULL) 
+    if(Server == NULL) 
     {
         printf("server not found\n");
         exit(EXIT_FAILURE);
@@ -35,11 +39,12 @@ void NetClient::NetConnect(const char* serverAddress)
 // A new remote player was added to our local simulation
 void NetClient::HandleAddPlayer(PlayerPacket packet)
 {
+    printf("Added new player\n");
 	// find out who the server is talking about
 	int remotePlayer = packet.Id;
 
     // skip if out of bounds, or local player
-	if (remotePlayer >= MAX_PLAYERS || remotePlayer == LocalPlayerId)
+	if(remotePlayer >= MAX_PLAYERS || remotePlayer == LocalPlayerId)
 		return;
 
 	// set them as active and update the location
@@ -56,7 +61,7 @@ void NetClient::HandleRemovePlayer(PlayerPacket packet)
 	int remotePlayer = packet.Id;
 
     // skip if out of bounds, or local player
-	if (remotePlayer >= MAX_PLAYERS || remotePlayer == LocalPlayerId)
+	if(remotePlayer >= MAX_PLAYERS || remotePlayer == LocalPlayerId)
 		return;
 
 	// remove the player from the simulation. No other data is needed except the player id
@@ -67,10 +72,10 @@ void NetClient::HandleRemovePlayer(PlayerPacket packet)
 void NetClient::HandleUpdatePlayer(PlayerPacket packet)
 {
 	// find out who the server is talking about
-	int remotePlayer =  packet.Id;
+	int remotePlayer = packet.Id;
 
     // skip if out of bounds, local player, or not active
-	if (remotePlayer >= MAX_PLAYERS || remotePlayer == LocalPlayerId || !Players[remotePlayer].Active)
+	if(remotePlayer >= MAX_PLAYERS || remotePlayer == LocalPlayerId || !Players[remotePlayer].Active)
 		return;
 
 	// update the last known position and movement
@@ -82,7 +87,7 @@ void NetClient::HandleUpdatePlayer(PlayerPacket packet)
 void NetClient::UpdateLocalPlayer(Vector3 pos, Matrix rot)
 {
     // if we are not accepted, we can't update
-	if (LocalPlayerId < 0)
+	if(LocalPlayerId < 0)
         return;
 
     // Update local player
@@ -121,7 +126,7 @@ void NetClient::HandlePlayerCollision()
 
 void NetClient::HandleUpdateAsteroid(AsteroidInfoPacket packet)
 {
-    for (int i = 0; i < packet.AsteroidCount && i < MAX_ASTEROIDS; i++) {
+    for(int i = 0; i < packet.AsteroidCount && i < MAX_ASTEROIDS; i++) {
         Asteroids[i] = packet.AllAsteroids[i];
     }
     AsteroidAmount = packet.AsteroidCount;
@@ -175,14 +180,14 @@ void NetClient::NetUpdate(double now, float delta)
     {
         // construct a buffer and send it through a packet
         PlayerPacket buffer = { 0 };
-        buffer.Command = UpdateInput;
+        buffer.Command = NetworkCommands::UpdateInput;
         buffer.Position = Players[LocalPlayerId].Position;
         buffer.Rotation = Players[LocalPlayerId].Rotation;
 
         // create packet
         ENetPacket* packet = enet_packet_create(&buffer, sizeof(buffer), ENET_PACKET_FLAG_RELIABLE);
         // send the data to the server
-        enet_peer_send(Server, 0, packet);
+        enet_peer_send(Server, 2, packet);
 
         LastInputSend = now;
     }
@@ -215,15 +220,15 @@ void NetClient::NetUpdate(double now, float delta)
                     {
                         switch (recieved.Command)
                         {
-                            case AddPlayer:
+                            case NetworkCommands::AddPlayer:
                                 HandleAddPlayer(recieved);
                                 break;
 
-                            case RemovePlayer:
+                            case NetworkCommands::RemovePlayer:
                                 HandleRemovePlayer(recieved);
                                 break;
 
-                            case UpdatePlayer:
+                            case NetworkCommands::UpdatePlayer:
                                 HandleUpdatePlayer(recieved);
                                 break;
                         }

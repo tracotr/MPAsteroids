@@ -107,13 +107,12 @@ void PlayerManager::DisconnectPlayer(int playerId)
 {
     Players[playerId].Active = false;
     Players[playerId].Peer = NULL;
-    Players[playerId].Position = {0};
+    Players[playerId].Position = { 0 };
     Players[playerId].Rotation = MatrixIdentity();
 
     PlayerPacket removePlayerPacket;
     removePlayerPacket.Command = NetworkCommands::RemovePlayer;
     removePlayerPacket.Id = playerId;
-
     // create packet
     ENetPacket* remove_player_packet = enet_packet_create(&removePlayerPacket, sizeof(removePlayerPacket), ENET_PACKET_FLAG_RELIABLE);
     // send data to all users

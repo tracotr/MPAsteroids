@@ -37,9 +37,6 @@ int main()
     World& world = World::Create();
     world.Reset();
 
-
-    
-
     while (!WindowShouldClose())
     {
         // Updating

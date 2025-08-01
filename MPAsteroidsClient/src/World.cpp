@@ -30,9 +30,7 @@ void World::Update(double delta)
     PlayerShip.Update(delta);
     
     NetClient.UpdateLocalPlayer(PlayerShip.Position, PlayerShip.Rotation);
-    NetClient.NetUpdate(GetTime(), GetFrameTime());
-
-
+    NetClient.NetUpdate(GetTime(), delta);
     CreateAsteroidCollision();
     CheckCollisions();
 }

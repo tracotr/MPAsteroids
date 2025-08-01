@@ -102,7 +102,6 @@ int main()
                         memcpy(&received, event.packet->data, sizeof(PlayerPacket));
 
                         NetworkCommands command = (NetworkCommands)received.Command;
-
                         if(command == NetworkCommands::UpdateInput)
                         {
                             playerManager.UpdateInput(&received, playerId);
