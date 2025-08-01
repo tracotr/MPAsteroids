@@ -30,7 +30,7 @@ void PlayerManager::UpdateInput(PlayerPacket* received, int playerId)
     // create packet
     ENetPacket* packet = enet_packet_create(&updatePlayerPacket, sizeof(updatePlayerPacket), 0);
     // send data to all users besides the user
-    NetworkUtil::SendPacketToAllBut(packet, Players, playerId, 0);
+    NetworkUtil::SendPacketToAllBut(packet, Players, playerId, 2);
 }
 
 // makes a new player and returns their id

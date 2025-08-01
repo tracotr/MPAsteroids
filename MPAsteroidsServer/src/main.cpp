@@ -34,7 +34,10 @@ int main()
 	Address.port = SERVER_PORT;
 
     // create the server host
-	Server = enet_host_create(&Address, MAX_PLAYERS, 2, 0, 0);
+    // channel 0: reliable packets
+    // channel 1: asteroid updates
+    // channel 2: player updates
+	Server = enet_host_create(&Address, MAX_PLAYERS, 3, 0, 0);
     
     if (Server == NULL) 
     {
@@ -60,7 +63,7 @@ int main()
 
         // Check for events (updates from clients)
         ENetEvent event = {};
-        if (enet_host_service(Server, &event, 1) > 0)
+        if (enet_host_service(Server, &event, 0) > 0)
 		{
             switch(event.type)
             {   
@@ -78,12 +81,7 @@ int main()
                     asteroidManager.SpawnAsteroids(asteroidAmount);
 
                     // send player current scoreboard data
-                    ScoreboardPacket scoreboardBuffer;
-                    scoreboardBuffer.Command = UpdateScoreboard;
-                    memcpy(scoreboardBuffer.Scoreboard, scoreboardManager.GetScoreboard(), sizeof(scoreboardManager.GetScoreboard()));
-                    // create packet and send
-                    ENetPacket* packet = enet_packet_create(&scoreboardBuffer, sizeof(scoreboardBuffer), 0);
-                    NetworkUtil::SendPacketToAllBut(packet, playerManager.GetPlayers(), -1, 1);
+                    scoreboardManager.UpdateScoreboard(playerManager.GetPlayers());
                     break;
                 }
                 

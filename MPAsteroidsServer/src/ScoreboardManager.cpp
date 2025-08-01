@@ -27,6 +27,6 @@ void ScoreboardManager::UpdateScoreboard(PlayerInfo (&players)[MAX_PLAYERS])
     scoreboardBuffer.Command = NetworkCommands::UpdateScoreboard;
     memcpy(scoreboardBuffer.Scoreboard, Scoreboard, sizeof(Scoreboard));
     // create packet and send
-    ENetPacket* packet = enet_packet_create(&scoreboardBuffer, sizeof(scoreboardBuffer), 0);
+    ENetPacket* packet = enet_packet_create(&scoreboardBuffer, sizeof(scoreboardBuffer), ENET_PACKET_FLAG_RELIABLE);
     NetworkUtil::SendPacketToAllBut(packet, players, -1, 1);
 }

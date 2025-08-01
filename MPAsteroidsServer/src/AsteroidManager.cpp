@@ -18,8 +18,8 @@ void AsteroidManager::UpdateAsteroids(PlayerInfo (&players)[MAX_PLAYERS], double
     memcpy(buffer.AllAsteroids, Asteroids, sizeof(Asteroids));
     buffer.AsteroidCount = AsteroidAmount;
 
-    // create packet
-    ENetPacket* packet = enet_packet_create(&buffer, sizeof(buffer), ENET_PACKET_FLAG_UNSEQUENCED);
+    // create packet, unreliable fragment because of large size of packet
+    ENetPacket* packet = enet_packet_create(&buffer, sizeof(buffer), ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT);
     // send to all connected clients
     NetworkUtil::SendPacketToAllBut(packet, players, -1, 1);
 }
