@@ -12,7 +12,7 @@ A simple 3D multiplayer asteroids game built in C++ using [raylib](www.raylib.co
 - You'll need the Makefile Tools plugin.
 
 ## Disclaimer
-- This is not fun, nor very good, nor not that optimized.
+- This is not fun, nor very good 
 - It's simply a project to test C++ game making, as I would prefer to make something in Godot.
 - However, the networking part was interesting, and I would like to apply that to other games.
 - I don't recommend trying to play this, but I do have gifs to see what it would look like. :)
