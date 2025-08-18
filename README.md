@@ -1,5 +1,6 @@
 # MP-Asteroids
 
+https://tracotr.itch.io/mpasteroids
 A simple 3D multiplayer asteroids game built in C++ using [raylib](www.raylib.com/) for rendering and [zpl-c/enet](https://github.com/zpl-c/enet) for networking.
 
 ## Features
