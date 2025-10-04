@@ -9,14 +9,7 @@
 ![](https://github.com/tracotr/MPAsteroidsRaylib/blob/main/Examples/example.gif)
 
 ## Building
-- The main way to build is to open either MPAsteroidsServer or MPAsteroidsClient in VSCode, and hit F5.
-- You'll need the Makefile Tools plugin.
-
-## Disclaimer
-- This is not fun, nor very good 
-- It's simply a project to test C++ game making, as I would prefer to make something in Godot.
-- However, the networking part was interesting, and I would like to apply that to other games.
-- I don't recommend trying to play this, but I do have gifs to see what it would look like. :)
+- Open project in VSCode with the makefile extension and hit f5.
 
 ## Controls
 - WASD : Tilt
