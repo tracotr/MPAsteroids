@@ -9,9 +9,8 @@
 
 ## Playing with others
 - Run the game, and click host.
-- You will need to port forward port ```25665``` for UDP connections
-- Use the host computers local IP to connect on the join screen.
-- It's possible to use hamachi or zero tier as well.
+- You will need to port forward port ```25665``` for UDP connections. It's possible to use hamachi or zero tier as well.
+- Use the host computers IP or tunneling IP  to connect on the join screen.
 
 ## Controls
 - WASD : Tilt
