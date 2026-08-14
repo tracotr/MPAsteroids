@@ -3,20 +3,15 @@
 - https://tracotr.itch.io/mpasteroids
 - A simple 3D multiplayer asteroids game built in C++ using [raylib](www.raylib.com/) for rendering and [zpl-c/enet](https://github.com/zpl-c/enet) for networking.
 
-## Features
-- A server and a client.
-- It's like somehow simpler asteroids, but 3d and multiplayer.
-![](https://github.com/tracotr/MPAsteroidsRaylib/blob/main/Examples/example.gif)
-
 ## Building
-- Open project in VSCode with the makefile extension and hit f5.
+- Download the Makefile [make](https://stackoverflow.com/questions/32127524/how-can-i-install-and-use-make-in-windows) command
+- run ```make``` inside of ```MPAsteroids/MPAsteroids``` (in the folder with the Makefile)  
 
 ## Playing with others
-- Run the server first - it listens on UDP port 25665 on all interfaces.
-- Launch the client. On the connect screen, type the server's address and press ENTER (defaults to `127.0.0.1` for solo/local testing).
-- **Same network:** use the host's local IP (e.g. `192.168.x.x`).
-- **Over the internet:** the host needs to forward UDP port 25665 to their machine, or you can skip that entirely by putting everyone on a VPN mesh like [Hamachi](https://vpn.net/) or [ZeroTier](https://www.zerotier.com/) and connecting to that IP instead.
-- If it can't connect within a few seconds, you'll get bounced back to the menu with a reason - double check the address and that the server is actually running.
+- Run the game, and click host.
+- You will need to port forward port ```25665``` for UDP connections
+- Use the host computers local IP to connect on the join screen.
+- It's possible to use hamachi or zero tier as well.
 
 ## Controls
 - WASD : Tilt
