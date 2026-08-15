@@ -90,7 +90,7 @@ bool NetClient::NetConnect(const char* serverAddress, const char* playerName)
     announce.Position = (Vector3){ 0.0f, 0.0f, 0.0f };
     announce.Rotation = MatrixIdentity();
 
-    ENetPacket* packet = enet_packet_create(&announce, sizeof(announce), ENET_PACKET_FLAG_RELIABLE);
+    ENetPacket* packet = enet_packet_create(&announce, sizeof(announce), 0);
     enet_peer_send(Server, 2, packet);
 
     return true;
