@@ -73,6 +73,7 @@ void GameApp::ProcessMenu()
                 world.Net.BeginHostedSession(menu.GetPlayerName());
                 connectStartTime = GetTime();
                 state = AppState::Playing;
+                menu.SetStatusMessage("");
             }
             else
             {
