@@ -118,7 +118,8 @@ private:
         AsteroidInfo& asteroid = asteroids[id];
         if (asteroid.Scale <= MIN_ASTEROID_SCALE)
         {
-            asteroids[id] = CreateAsteroid();
+            asteroids[id] = asteroids[asteroidAmount - 1];
+            asteroidAmount--;
             return;
         }
 
@@ -282,6 +283,11 @@ private:
 
     void UpdateAsteroids(double delta)
     {
+        if (asteroidAmount < 10)
+        {
+            SpawnAsteroids(1);
+        }
+
         for (int i = 0; i < asteroidAmount; ++i)
         {
             AsteroidInfo& asteroid = asteroids[i];
