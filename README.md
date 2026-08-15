@@ -18,3 +18,4 @@
 - R : Forwards
 - F : Backwards
 - Space : Shoot
+- Shift : Slow turn rate
