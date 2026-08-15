@@ -21,9 +21,9 @@ namespace Sounds
     void Shutdown();
     void SetMasterVolume(float volume);
 
-    void PlayLaser(Vector3 sourcePosition, Vector3 listenerPosition = { 0.0f, 0.0f, 0.0f });
-    void PlayExplosion(Vector3 sourcePosition, Vector3 listenerPosition = { 0.0f, 0.0f, 0.0f });
-    void PlayHurt(Vector3 sourcePosition, Vector3 listenerPosition = { 0.0f, 0.0f, 0.0f });
-    void PlayBooster(Vector3 sourcePosition, Vector3 listenerPosition = { 0.0f, 0.0f, 0.0f });
+    void PlayLaser(Vector3 sourcePosition, Vector3 listenerPosition, Camera3D camera);
+    void PlayExplosion(Vector3 sourcePosition, Vector3 listenerPosition, Camera3D camera);
+    void PlayHurt(Vector3 sourcePosition, Vector3 listenerPosition, Camera3D camera);
+    void PlayBooster(Vector3 sourcePosition, Vector3 listenerPosition, Camera3D camera);
     void StopBooster();
 }

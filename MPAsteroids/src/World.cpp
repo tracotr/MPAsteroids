@@ -21,19 +21,17 @@ void World::Destroy()
 
 void World::Reset()
 {
-    // Networking is started separately (see main.cpp's connect menu) so the
-    // player can choose who to connect to instead of always hitting localhost.
     PlayerShip.Reset();
 }
 
-void World::Update(double delta)
+void World::Update(double delta, Camera3D camera)
 {
-    PlayerShip.Update(delta);
+    PlayerShip.Update(delta, camera);
     
     Net.UpdateLocalPlayer(PlayerShip.Position, PlayerShip.Rotation);
     Net.NetUpdate(GetTime(), delta);
     CreateAsteroidCollision();
-    CheckCollisions();
+    CheckCollisions(camera);
 }
 
 void World::Draw()
@@ -119,7 +117,7 @@ void World::CreateAsteroidCollision()
     }
 }
 
-void World::CheckShipCollisions(BoundingBox asteroidBox)
+void World::CheckShipCollisions(BoundingBox asteroidBox, Camera3D camera)
 {
     BoundingBox PlayerBox = Models::GetWorldBoundingBox(Models::ShipBoxLocal, PlayerShip.Position, PlayerShip.Rotation);
 
@@ -128,12 +126,12 @@ void World::CheckShipCollisions(BoundingBox asteroidBox)
     {
         Vector3 hitPosition = PlayerShip.Position;
         PlayerShip.Respawn();
-        Sounds::PlayHurt(hitPosition, PlayerShip.Position);
+        Sounds::PlayHurt(hitPosition, PlayerShip.Position, camera);
         Net.HandlePlayerCollision();
     }
 }
 
-void World::CheckLaserCollisions(BoundingBox asteroidBox, int asteroidId)
+void World::CheckLaserCollisions(BoundingBox asteroidBox, int asteroidId, Camera3D camera)
 {
     if(!PlayerShip.isFiring){
         return;
@@ -142,16 +140,15 @@ void World::CheckLaserCollisions(BoundingBox asteroidBox, int asteroidId)
     Vector3 start = PlayerShip.Position;
     Vector3 direction = PlayerShip.GetForwardVector();
     Ray laser = { start, direction };
-    // Calculate bounding boxes for asteroids, and check collisions
 
-    // check player-asteroid collisions
+    // Calculate bounding boxes for asteroids, and check collisions
     if(GetRayCollisionBox(laser, asteroidBox).hit)
     {
         Vector3 asteroidPosition = { 0.0f, 0.0f, 0.0f };
         Matrix asteroidRotation = MatrixIdentity();
         if (Net.GetAsteroidSpatial(asteroidId, &asteroidPosition, &asteroidRotation))
         {
-            Sounds::PlayExplosion(asteroidPosition, PlayerShip.Position);
+            Sounds::PlayExplosion(asteroidPosition, PlayerShip.Position, camera);
         }
 
         Net.HandleDestroyAsteroid(Net.GetLocalPlayerId(), asteroidId);
@@ -159,12 +156,12 @@ void World::CheckLaserCollisions(BoundingBox asteroidBox, int asteroidId)
     }
 }
 
-void World::CheckCollisions()
+void World::CheckCollisions(Camera3D camera)
 {
     for(int i = 0; i < Net.GetMaxAsteroids(); i++)
     {
-        CheckShipCollisions(AsteroidBoundingBoxes[i]);
-        CheckLaserCollisions(AsteroidBoundingBoxes[i], i);
+        CheckShipCollisions(AsteroidBoundingBoxes[i], camera);
+        CheckLaserCollisions(AsteroidBoundingBoxes[i], i, camera);
     }
 }
 

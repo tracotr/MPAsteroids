@@ -11,7 +11,7 @@ public:
     bool boosterActive = false;
 
     // need to update and draw player
-    void Update(double delta) override;
+    virtual void Update(double delta, Camera3D camera) override;
     void Draw() override;
 
     // functions to reset player

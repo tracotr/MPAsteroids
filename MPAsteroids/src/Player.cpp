@@ -3,13 +3,13 @@
 #include "include/Sounds.h"
 #include <iostream>
 
-void Player::Update(double delta)
+void Player::Update(double delta, Camera3D camera)
 {   
     bool thrusting = IsKeyDown(KEY_R) || IsKeyDown(KEY_F);
     if (thrusting && !boosterActive)
     {
         boosterActive = true;
-        Sounds::PlayBooster(Position, Position);
+        Sounds::PlayBooster(Position, Position, camera);
     }
     else if (!thrusting && boosterActive)
     {
@@ -28,7 +28,7 @@ void Player::Update(double delta)
         if(laserCooldown >= LASER_COOLDOWN_DURATION)
         {
             laserCooldown = 0;
-            Sounds::PlayLaser(Position, Position);
+            Sounds::PlayLaser(Position, Position, camera);
         }
         isFiring = (laserCooldown == 0) ? true: false;
     }

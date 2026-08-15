@@ -136,7 +136,7 @@ void GameApp::ProcessConnecting()
 void GameApp::ProcessPlaying()
 {
     World& world = World::Create();
-    world.Update(GetFrameTime());
+    world.Update(GetFrameTime(), camera);
     UpdateCamera();
 
     BeginDrawing();
