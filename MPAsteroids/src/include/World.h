@@ -18,23 +18,19 @@ public:
 
     void Reset();
 
-    void Update(double delta);
+    void Update(double delta, Camera3D camera);
     void Draw();
     void DrawPlayerModels();
     void DrawAsteroidModels();
     void DrawShipLaser();
     void DrawUI(Camera camera);
     void CreateAsteroidCollision();
-    void CheckShipCollisions(BoundingBox asteroidBox);
-    void CheckLaserCollisions(BoundingBox asteroidBox, int asteroidId);
-    void CheckCollisions();
+    void CheckShipCollisions(BoundingBox asteroidBox, Camera3D camera);
+    void CheckLaserCollisions(BoundingBox asteroidBox, int asteroidId, Camera3D camera);
+    void CheckCollisions(Camera3D camera);
 
     Player PlayerShip;
     BoundingBox AsteroidBoundingBoxes[MAX_ASTEROIDS];
 
-    // Named "Net" rather than "NetClient" to avoid shadowing the NetClient
-    // type name itself (newer GCC treats that as a hard error, not just a
-    // warning, which broke builds on toolchains other than the one this
-    // project was originally pinned to).
     NetClient Net;
 };
