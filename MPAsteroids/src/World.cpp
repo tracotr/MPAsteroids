@@ -47,6 +47,73 @@ void World::Draw()
 void World::DrawUI(Camera camera)
 {
     Models::DrawUI(camera, PlayerShip.Velocity, PlayerShip.Position, Net.GetLocalPlayerId(), Net.GetScoreboard(), Net.GetPlayerNames());
+
+    auto playerNames = Net.GetPlayerNames();
+    std::vector<std::pair<Vector3, std::string>> otherPlayersData;
+    for (int i = 0; i < MAX_PLAYERS; i++)
+    {
+        if (i == Net.GetLocalPlayerId()) continue;
+
+        Vector3 pos = { 0.0f, 0.0f, 0.0f };
+        Matrix rot = MatrixIdentity();
+        
+        if (Net.GetPlayerSpatial(i, &pos, &rot))
+        {
+            otherPlayersData.push_back({pos, playerNames[i]});
+        }
+    }
+
+    DrawPlayerIndicators(camera, otherPlayersData, GetScreenWidth(), GetScreenHeight());
+}
+
+
+void World::DrawPlayerIndicators(Camera3D camera, const std::vector<std::pair<Vector3, std::string>>& otherPlayersData, int screenWidth, int screenHeight) {
+    Vector2 screenCenter = { (float)screenWidth / 2.0f, (float)screenHeight / 2.0f };
+    float edgeMargin = 40.0f;
+
+    for (const auto& playerData : otherPlayersData) {
+        Vector3 targetPos = playerData.first;
+        const char* playerName = playerData.second.c_str();
+
+        float distance = Vector3Distance(camera.position, targetPos);
+        Vector2 screenPos = GetWorldToScreen(targetPos, camera);
+
+        Vector3 forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+        Vector3 toTarget = Vector3Subtract(targetPos, camera.position);
+        bool isBehind = Vector3DotProduct(forward, toTarget) < 0.0f;
+
+        if (isBehind) {
+            screenPos.x = screenCenter.x - (screenPos.x - screenCenter.x);
+            screenPos.y = screenCenter.y - (screenPos.y - screenCenter.y);
+        }
+
+        bool isOffScreen = isBehind || 
+                           screenPos.x < edgeMargin || 
+                           screenPos.x > (screenWidth - edgeMargin) || 
+                           screenPos.y < edgeMargin || 
+                           screenPos.y > (screenHeight - edgeMargin);
+
+        if (isOffScreen) {
+            Vector2 dir = Vector2Normalize(Vector2Subtract(screenPos, screenCenter));
+            Vector2 clampedPos = {
+                Clamp(screenCenter.x + dir.x * (screenWidth / 2.0f - edgeMargin), edgeMargin, screenWidth - edgeMargin),
+                Clamp(screenCenter.y + dir.y * (screenHeight / 2.0f - edgeMargin), edgeMargin, screenHeight - edgeMargin)
+            };
+
+            float angle = atan2f(dir.y, dir.x);
+            Vector2 p1 = { clampedPos.x + cosf(angle) * 12.0f, clampedPos.y + sinf(angle) * 12.0f };
+            Vector2 p2 = { clampedPos.x + cosf(angle + 2.4f) * 10.0f, clampedPos.y + sinf(angle + 2.4f) * 10.0f };
+            Vector2 p3 = { clampedPos.x + cosf(angle - 2.4f) * 10.0f, clampedPos.y + sinf(angle - 2.4f) * 10.0f };
+
+            DrawTriangle(p1, p3, p2, RED);
+            
+            DrawText(playerName, (int)(clampedPos.x - 15), (int)(clampedPos.y + 12), 10, RAYWHITE);
+            DrawText(TextFormat("%0.0fm", distance), (int)(clampedPos.x - 15), (int)(clampedPos.y + 22), 10, LIGHTGRAY);
+        } else {            
+            DrawText(playerName, (int)(screenPos.x - 15), (int)(screenPos.y - 38), 10, RAYWHITE);
+            DrawText(TextFormat("%0.0fm", distance), (int)(screenPos.x - 15), (int)(screenPos.y - 28), 10, LIGHTGRAY);
+        }
+    }
 }
 
 void World::DrawPlayerModels()
@@ -62,6 +129,8 @@ void World::DrawPlayerModels()
         }
     }
 }
+
+
 
 void World::DrawAsteroidModels()
 {
