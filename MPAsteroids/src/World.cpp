@@ -1,4 +1,5 @@
 #include "include/World.h"
+#include "include/GameApp.h"
 
 World* World::Instance = nullptr;
 
@@ -21,31 +22,54 @@ void World::Destroy()
 
 void World::Reset()
 {
+    Player& PlayerShip = GameApp::GetInstance()->GetPlayer();
     PlayerShip.Reset();
 }
 
-void World::Update(double delta, Camera3D camera)
+void World::Update(double delta)
 {
-    PlayerShip.Update(delta, camera);
+    Player& PlayerShip = GameApp::GetInstance()->GetPlayer();
+    NetClient& Net = GameApp::GetInstance()->GetNet();
+
+    PlayerShip.Update(delta);
+    
+    if (PlayerShip.isFiring) {
+        Vector3 velocity = Vector3Scale(PlayerShip.GetForwardVector(), PlayerShip.LASER_SPEED);
+        FireProjectile(PlayerShip.Position, velocity);
+        Net.SendProjectile(PlayerShip.Position, velocity);
+    }
+
+    for (int i = 0; i < Net.RemoteProjectileCount; i++) {
+        FireProjectile(Net.RemoteProjectilesQueue[i].Position, Net.RemoteProjectilesQueue[i].Velocity);
+    }
+    Net.RemoteProjectileCount = 0;
+    
+    UpdateProjectiles(delta);
     
     Net.UpdateLocalPlayer(PlayerShip.Position, PlayerShip.Rotation);
     Net.NetUpdate(GetTime(), delta);
     CreateAsteroidCollision();
-    CheckCollisions(camera);
+    CheckCollisions();
 }
 
 void World::Draw()
 {
-    Models::DrawSkybox();
+    Player& PlayerShip = GameApp::GetInstance()->GetPlayer();
 
+    Models::DrawSkybox();
     PlayerShip.Draw();
     DrawPlayerModels();
     DrawAsteroidModels();
-    DrawShipLaser();
+    DrawProjectiles();
 }
 
-void World::DrawUI(Camera camera)
+void World::DrawUI()
 {
+    Camera3D camera = GameApp::GetInstance()->GetCamera();
+    
+    Player& PlayerShip = GameApp::GetInstance()->GetPlayer();
+    NetClient& Net = GameApp::GetInstance()->GetNet();
+
     Models::DrawUI(camera, PlayerShip.Velocity, PlayerShip.Position, Net.GetLocalPlayerId(), Net.GetScoreboard(), Net.GetPlayerNames());
 
     auto playerNames = Net.GetPlayerNames();
@@ -63,11 +87,13 @@ void World::DrawUI(Camera camera)
         }
     }
 
-    DrawPlayerIndicators(camera, otherPlayersData, GetScreenWidth(), GetScreenHeight());
+    DrawPlayerIndicators(otherPlayersData, GetScreenWidth(), GetScreenHeight());
 }
 
 
-void World::DrawPlayerIndicators(Camera3D camera, const std::vector<std::pair<Vector3, std::string>>& otherPlayersData, int screenWidth, int screenHeight) {
+void World::DrawPlayerIndicators(const std::vector<std::pair<Vector3, std::string>>& otherPlayersData, int screenWidth, int screenHeight) {
+    Camera3D camera = GameApp::GetInstance()->GetCamera();
+
     Vector2 screenCenter = { (float)screenWidth / 2.0f, (float)screenHeight / 2.0f };
     float edgeMargin = 40.0f;
 
@@ -116,8 +142,85 @@ void World::DrawPlayerIndicators(Camera3D camera, const std::vector<std::pair<Ve
     }
 }
 
-void World::DrawPlayerModels()
+void World::UpdateProjectiles(double delta)
 {
+    for (int i = 0; i < MAX_PROJECTILES; i++)
+    {
+        if (Projectiles[i].active)
+        {
+            Projectiles[i].position = Vector3Add(Projectiles[i].position, Vector3Scale(Projectiles[i].velocity, delta));
+            Projectiles[i].lifeTime -= delta;
+            
+            if (Projectiles[i].lifeTime <= 0.0f)
+            {
+                Projectiles[i].active = false;
+            }
+        }
+    }
+}
+
+void World::FireProjectile(Vector3 position, Vector3 velocity)
+{
+    for (int i = 0; i < MAX_PROJECTILES; i++)
+    {
+        if (!Projectiles[i].active)
+        {
+            Projectiles[i].active = true;
+            Projectiles[i].position = position;
+            Projectiles[i].velocity = velocity;
+            Projectiles[i].lifeTime = 2.0f;
+            break;
+        }
+    }
+}
+
+void World::DrawProjectiles()
+{
+    for (int i = 0; i < MAX_PROJECTILES; i++)
+    {
+        if (Projectiles[i].active)
+        {
+            DrawSphere(Projectiles[i].position, 0.15f, WHITE);
+        }
+    }
+}
+
+void World::CheckProjectileCollisions()
+{
+    Player& PlayerShip = GameApp::GetInstance()->GetPlayer();
+    NetClient& Net = GameApp::GetInstance()->GetNet();
+    
+    for (int p = 0; p < MAX_PROJECTILES; p++)
+    {
+        if (!Projectiles[p].active) continue;
+
+        for (int a = 0; a < Net.GetMaxAsteroids(); a++)
+        {
+            if (CheckCollisionBoxSphere(AsteroidBoundingBoxes[a], Projectiles[p].position, 0.5f))
+            {
+                Projectiles[p].active = false; 
+
+                Vector3 asteroidPosition = { 0.0f, 0.0f, 0.0f };
+                Matrix asteroidRotation = MatrixIdentity();
+                if (Net.GetAsteroidSpatial(a, &asteroidPosition, &asteroidRotation))
+                {
+                    Sounds::PlayExplosion(asteroidPosition, PlayerShip.Position);
+                }
+
+                Net.HandleDestroyAsteroid(Net.GetLocalPlayerId(), a);
+                
+                AsteroidBoundingBoxes[a].min = { 0.0f, 0.0f, 0.0f };
+                AsteroidBoundingBoxes[a].max = { 0.0f, 0.0f, 0.0f };
+                
+                break; 
+            }
+        }
+    }
+}
+void World::DrawPlayerModels()
+{   
+    NetClient& Net = GameApp::GetInstance()->GetNet();
+
     // draw other player models
     for (int i = 0; i < MAX_PLAYERS; i++)
     {
@@ -134,6 +237,8 @@ void World::DrawPlayerModels()
 
 void World::DrawAsteroidModels()
 {
+    NetClient& Net = GameApp::GetInstance()->GetNet();
+
     // Draw asteroid models
     for(int i = 0; i < Net.GetMaxAsteroids(); i++)
     {
@@ -147,29 +252,10 @@ void World::DrawAsteroidModels()
     }
 }
 
-void World::DrawShipLaser()
-{
-    Vector3 start = PlayerShip.Position;
-    Vector3 direction = PlayerShip.GetForwardVector();
-
-    double distance = 50.0f;
-
-    for(int i = 0; i < Net.GetMaxAsteroids(); i++)
-    {
-        Ray ray = { start, direction };
-        RayCollision hit = GetRayCollisionBox(ray, AsteroidBoundingBoxes[i]);
-        if (hit.hit && hit.distance < distance) {
-            distance = hit.distance;
-        }
-    }
-
-    Vector3 end = Vector3Add(start, Vector3Scale(direction, distance));
-
-    DrawLine3D(start, end, RAYWHITE);
-}
-
 void World::CreateAsteroidCollision()
 {
+    NetClient& Net = GameApp::GetInstance()->GetNet();
+
     for(int i = 0; i < Net.GetMaxAsteroids(); i++)
     {
         // calculating bounding boxes
@@ -186,8 +272,11 @@ void World::CreateAsteroidCollision()
     }
 }
 
-void World::CheckShipCollisions(BoundingBox asteroidBox, Camera3D camera)
+void World::CheckShipCollisions(BoundingBox asteroidBox, int asteroidId)
 {
+    Player& PlayerShip = GameApp::GetInstance()->GetPlayer();
+    NetClient& Net = GameApp::GetInstance()->GetNet();
+
     BoundingBox PlayerBox = Models::GetWorldBoundingBox(Models::ShipBoxLocal, PlayerShip.Position, PlayerShip.Rotation);
 
     // check player-asteroid collisions
@@ -195,42 +284,26 @@ void World::CheckShipCollisions(BoundingBox asteroidBox, Camera3D camera)
     {
         Vector3 hitPosition = PlayerShip.Position;
         PlayerShip.Respawn();
-        Sounds::PlayHurt(hitPosition, PlayerShip.Position, camera);
+        Sounds::PlayHurt(hitPosition, PlayerShip.Position);
+        
         Net.HandlePlayerCollision();
-    }
-}
-
-void World::CheckLaserCollisions(BoundingBox asteroidBox, int asteroidId, Camera3D camera)
-{
-    if(!PlayerShip.isFiring){
-        return;
-    }
-
-    Vector3 start = PlayerShip.Position;
-    Vector3 direction = PlayerShip.GetForwardVector();
-    Ray laser = { start, direction };
-
-    // Calculate bounding boxes for asteroids, and check collisions
-    if(GetRayCollisionBox(laser, asteroidBox).hit)
-    {
-        Vector3 asteroidPosition = { 0.0f, 0.0f, 0.0f };
-        Matrix asteroidRotation = MatrixIdentity();
-        if (Net.GetAsteroidSpatial(asteroidId, &asteroidPosition, &asteroidRotation))
-        {
-            Sounds::PlayExplosion(asteroidPosition, PlayerShip.Position, camera);
-        }
 
         Net.HandleDestroyAsteroid(Net.GetLocalPlayerId(), asteroidId);
-        PlayerShip.isFiring = false;
+        
+        AsteroidBoundingBoxes[asteroidId].min = { 0.0f, 0.0f, 0.0f };
+        AsteroidBoundingBoxes[asteroidId].max = { 0.0f, 0.0f, 0.0f };
     }
 }
 
-void World::CheckCollisions(Camera3D camera)
+void World::CheckCollisions()
 {
+    NetClient& Net = GameApp::GetInstance()->GetNet();
+
     for(int i = 0; i < Net.GetMaxAsteroids(); i++)
     {
-        CheckShipCollisions(AsteroidBoundingBoxes[i], camera);
-        CheckLaserCollisions(AsteroidBoundingBoxes[i], i, camera);
+        CheckShipCollisions(AsteroidBoundingBoxes[i], i);
     }
+    
+    CheckProjectileCollisions();
 }
 

@@ -28,6 +28,6 @@ public:
     const Vector3 Left = (Vector3){ 0.0f, 1.0f, 0.0f };
     const Vector3 Right = (Vector3){ 0.0f, -1.0f, 0.0f };
 
-    virtual void Update(double delta, Camera3D camera);
+    virtual void Update(double delta);
     virtual void Draw();
 };

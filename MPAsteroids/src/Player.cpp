@@ -1,15 +1,16 @@
 #include "include/Player.h"
 #include "include/Models.h"
 #include "include/Sounds.h"
+#include "include/GameApp.h"
 #include <iostream>
 
-void Player::Update(double delta, Camera3D camera)
+void Player::Update(double delta)
 {   
     bool thrusting = IsKeyDown(KEY_R) || IsKeyDown(KEY_F);
     if (thrusting && !boosterActive)
     {
         boosterActive = true;
-        Sounds::PlayBooster(Position, Position, camera);
+        Sounds::PlayBooster(Position, Position); 
     }
     else if (!thrusting && boosterActive)
     {
@@ -23,16 +24,17 @@ void Player::Update(double delta, Camera3D camera)
 
     // Shooting controls
     // ----------------------
+    isFiring = false;
     if (IsKeyDown(KEY_SPACE))
     {
         if(laserCooldown >= LASER_COOLDOWN_DURATION)
         {
             laserCooldown = 0;
-            Sounds::PlayLaser(Position, Position, camera);
+            Sounds::PlayLaser(Position, Position);
+            isFiring = true;
         }
-        isFiring = (laserCooldown == 0) ? true: false;
     }
-
+    
     // Rotation controls
     // ----------------------
     float currentRotationSpeed = RotationSpeed;

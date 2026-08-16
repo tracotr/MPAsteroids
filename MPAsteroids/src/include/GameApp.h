@@ -2,23 +2,29 @@
 #include "raylib/raylib.h"
 #include "ServerHost.h"
 #include "MenuScreen.h"
+#include "NetClient.h"
+#include "Player.h"
 #include <string>
 
-enum class AppState
-{
+enum class AppState {
     Menu,
     Connecting,
     Playing
 };
 
-class GameApp
-{
+class GameApp {
 public:
     GameApp();
     
     void Initialize();
     void RunLoop();
     void Shutdown();
+
+    static GameApp* GetInstance();
+    Camera3D GetCamera() const { return camera; }
+    
+    NetClient& GetNet() { return Net; }
+    Player& GetPlayer() { return PlayerShip; }
 
 private:
     void ProcessMenu();
@@ -30,7 +36,11 @@ private:
     Camera3D camera;
     ServerHost hostedServer;
     MenuScreen menu;
+    
+    NetClient Net;
+    Player PlayerShip;
 
+    static GameApp* instance;
     std::string hostAddress;
     double connectStartTime;
 

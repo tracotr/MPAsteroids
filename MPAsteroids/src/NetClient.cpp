@@ -41,9 +41,7 @@ namespace
 
 bool NetClient::NetConnect(const char* serverAddress, const char* playerName)
 {
-    // Tear down any previous attempt first, so retrying with a different
-    // address (e.g. after a typo or a timed-out connection) doesn't leak
-    // the old client host or leave stale peer state behind.
+    // Tear down any previous attempt first, so retrying with a different address doesn't leak the old client host or leave stale peer state behind.
     if (Client != NULL)
     {
         enet_host_destroy(Client);
@@ -387,6 +385,21 @@ void NetClient::NetUpdate(double now, float delta)
                         HandleUpdateScoreboard(recieved);
                     }
                 }
+                else if (event.packet->dataLength == sizeof(ProjectilePacket))
+                {
+                    ProjectilePacket recieved;
+                    memcpy(&recieved, event.packet->data, sizeof(ProjectilePacket));
+
+                    if (recieved.Command == NetworkCommands::FireProjectile)
+                    {
+                        if (RemoteProjectileCount < MAX_PROJECTILES)
+                        {
+                            RemoteProjectilesQueue[RemoteProjectileCount].Position = recieved.Position;
+                            RemoteProjectilesQueue[RemoteProjectileCount].Velocity = recieved.Velocity;
+                            RemoteProjectileCount++;
+                        }
+                    }
+                }
 
                 enet_packet_destroy(event.packet);
                 break;
@@ -427,3 +440,14 @@ void NetClient::NetUpdate(double now, float delta)
     }
 }
 
+void NetClient::SendProjectile(Vector3 position, Vector3 velocity)
+{
+    ProjectilePacket buffer = { 0 };
+    buffer.Command = NetworkCommands::FireProjectile;
+    buffer.PlayerID = LocalPlayerId;
+    buffer.Position = position;
+    buffer.Velocity = velocity;
+
+    ENetPacket* packet = enet_packet_create(&buffer, sizeof(buffer), ENET_PACKET_FLAG_RELIABLE);
+    enet_peer_send(Server, 0, packet);
+}

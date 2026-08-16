@@ -9,6 +9,8 @@
 
 bool EnsureENetReady();
 
+#define MAX_PROJECTILES 100
+
 class NetClient
 {
 private:
@@ -23,8 +25,6 @@ private:
 
         double LastUpdateTime;
     };
-
-
 
     int LocalPlayerId = -1;
     RemotePlayers Players[MAX_PLAYERS] = { 0 };
@@ -45,6 +45,14 @@ private:
     int AsteroidAmount = 0;
 
 public:
+    struct RemoteProjectileEvent {
+        Vector3 Position;
+        Vector3 Velocity;
+    };
+
+    RemoteProjectileEvent RemoteProjectilesQueue[MAX_PROJECTILES];
+    int RemoteProjectileCount = 0;
+
     void HandleAddPlayer(PlayerPacket packet);
     void HandleRemovePlayer(PlayerPacket packet);
     void HandleUpdatePlayer(PlayerPacket packet);
@@ -57,12 +65,8 @@ public:
     bool GetAsteroidSpatial(int id, Vector3* pos, Matrix* rot, float* scale = nullptr);
 
     void HandleUpdateScoreboard(ScoreboardPacket packet);
+    void SendProjectile(Vector3 position, Vector3 velocity);
 
-    // Attempts to start a connection to the given address. Returns false
-    // immediately if local networking couldn't be set up (e.g. ENet failed
-    // to initialize); the connection itself is asynchronous, so success here
-    // just means the attempt started. Poll GetLocalPlayerId() != -1 to know
-    // once the server has actually accepted us.
     bool NetConnect(const char* address, const char* playerName = nullptr);
     void BeginHostedSession(const char* playerName);
     void NetUpdate(double now, float delta);

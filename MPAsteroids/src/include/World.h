@@ -12,31 +12,38 @@
 #include <string>
 #include <vector>
 
-class World
-{
+struct Projectile {
+    bool active = false;
+    Vector3 position;
+    Vector3 velocity;
+    float lifeTime;
+};
+
+class World {
 public:
     static World* Instance;
-
     static World& Create();
     static void Destroy();
 
     void Reset();
-
-    void Update(double delta, Camera3D camera);
+    void Update(double delta);
     void Draw();
     void DrawPlayerModels();
     
     void DrawAsteroidModels();
-    void DrawShipLaser();
-    void DrawUI(Camera camera);
-    void DrawPlayerIndicators(Camera3D camera, const std::vector<std::pair<Vector3, std::string>>& otherPlayersData, int screenWidth, int screenHeight);
+    void DrawUI();
+    void DrawPlayerIndicators(const std::vector<std::pair<Vector3, std::string>>& otherPlayersData, int screenWidth, int screenHeight);
+
+    void UpdateProjectiles(double delta);
+    
+    void FireProjectile(Vector3 position, Vector3 velocity);
+    
+    void DrawProjectiles();
+    void CheckProjectileCollisions();
     void CreateAsteroidCollision();
-    void CheckShipCollisions(BoundingBox asteroidBox, Camera3D camera);
-    void CheckLaserCollisions(BoundingBox asteroidBox, int asteroidId, Camera3D camera);
-    void CheckCollisions(Camera3D camera);
+    void CheckShipCollisions(BoundingBox asteroidBox, int asteroidId);
+    void CheckCollisions();
 
-    Player PlayerShip;
+    Projectile Projectiles[MAX_PROJECTILES];
     BoundingBox AsteroidBoundingBoxes[MAX_ASTEROIDS];
-
-    NetClient Net;
 };

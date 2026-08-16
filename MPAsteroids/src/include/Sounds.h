@@ -1,10 +1,8 @@
 #pragma once
-
 #include "raylib/raylib.h"
 #include "raylib/raymath.h"
 
-namespace Sounds
-{
+namespace Sounds {
     constexpr int LASER_SOUND_COUNT = 5;
     constexpr int EXPLOSION_SOUND_COUNT = 4;
     constexpr int HURT_SOUND_COUNT = 1;
@@ -21,9 +19,9 @@ namespace Sounds
     void Shutdown();
     void SetMasterVolume(float volume);
 
-    void PlayLaser(Vector3 sourcePosition, Vector3 listenerPosition, Camera3D camera);
-    void PlayExplosion(Vector3 sourcePosition, Vector3 listenerPosition, Camera3D camera);
-    void PlayHurt(Vector3 sourcePosition, Vector3 listenerPosition, Camera3D camera);
-    void PlayBooster(Vector3 sourcePosition, Vector3 listenerPosition, Camera3D camera);
+    void PlayLaser(Vector3 sourcePosition, Vector3 listenerPosition);
+    void PlayExplosion(Vector3 sourcePosition, Vector3 listenerPosition);
+    void PlayHurt(Vector3 sourcePosition, Vector3 listenerPosition);
+    void PlayBooster(Vector3 sourcePosition, Vector3 listenerPosition);
     void StopBooster();
 }

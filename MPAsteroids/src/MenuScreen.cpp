@@ -12,6 +12,16 @@ MenuScreen::MenuScreen()
     playerNameBuffer[MAX_PLAYER_NAME_LENGTH - 1] = '\0';
     playerNameLength = static_cast<int>(std::strlen(playerNameBuffer));
     addressBuffer[0] = '\0';
+
+    float nameBoxWidth = 300.0f;
+    nameBox = { (WINDOW_WIDTH - nameBoxWidth) / 2.0f, 160.0f, nameBoxWidth, 32.0f };
+    
+    float btnWidth = 220.0f;
+    hostButton = { (WINDOW_WIDTH - btnWidth) / 2.0f, 220.0f, btnWidth, 44.0f };
+    joinButton = { (WINDOW_WIDTH - btnWidth) / 2.0f, 280.0f, btnWidth, 44.0f };
+    
+    float addressBoxWidth = 580.0f;
+    addressBox = { (WINDOW_WIDTH - addressBoxWidth) / 2.0f, 380.0f, addressBoxWidth, 40.0f };
 }
 
 void MenuScreen::Init(const std::string& defaultAddress)
@@ -50,22 +60,14 @@ void MenuScreen::HandleTextInput(char* buffer, int* length, int maxLength)
 
 MenuAction MenuScreen::Update()
 {
-    // Clear name on TAB
     if (IsKeyPressed(KEY_TAB))
     {
         playerNameLength = 0;
         playerNameBuffer[0] = '\0';
     }
 
-    // Input Box Rectangles
-    Rectangle nameBox = { 420.0f, 165.0f, 300.0f, 32.0f };
-    Rectangle addressBox = { 350.0f, 320.0f, 580.0f, 40.0f };
-    Rectangle hostButton = { 370.0f, 220.0f, 220.0f, 44.0f };
-    Rectangle joinButton = { 690.0f, 220.0f, 220.0f, 44.0f };
-
     Vector2 mouse = GetMousePosition();
 
-    // Mouse Interactions
     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
     {
         if (CheckCollisionPointRec(mouse, nameBox)) inputFocus = InputFocus::Name;
@@ -85,7 +87,6 @@ MenuAction MenuScreen::Update()
         }
     }
 
-    // Keyboard Focus
     if (inputFocus == InputFocus::Name)
     {
         HandleTextInput(playerNameBuffer, &playerNameLength, MAX_PLAYER_NAME_LENGTH - 1);
@@ -95,7 +96,6 @@ MenuAction MenuScreen::Update()
         HandleTextInput(addressBuffer, &addressLength, MAX_ADDRESS_LENGTH);
     }
 
-    // Hotkeys
     if (IsKeyPressed(KEY_H)) selection = MenuChoice::Host;
     if (IsKeyPressed(KEY_J)) selection = MenuChoice::Join;
 
@@ -114,20 +114,20 @@ void MenuScreen::Draw(const std::string& hostAddress)
     int titleWidth = MeasureText(title, 40);
     DrawText(title, (WINDOW_WIDTH - titleWidth) / 2, 80, 40, RAYWHITE);
     
-    DrawText("Player name:", 290, 175, 18, RAYWHITE);
-    Rectangle nameBox = { 420.0f, 165.0f, 300.0f, 32.0f };
+    const char* nameLabel = "Player name:";
+    int nameLabelWidth = MeasureText(nameLabel, 18);
+    DrawText(nameLabel, (WINDOW_WIDTH - nameLabelWidth) / 2, 135, 18, RAYWHITE);
+    
     DrawRectangleRec(nameBox, Fade(RAYWHITE, 0.1f));
     DrawRectangleLinesEx(nameBox, 2, inputFocus == InputFocus::Name ? GREEN : RAYWHITE);
-    DrawText(playerNameBuffer, 430, 171, 20, GREEN);
+    DrawText(playerNameBuffer, (int)nameBox.x + 10, (int)nameBox.y + 6, 20, GREEN);
     
     if (inputFocus == InputFocus::Name && ((int)(GetTime() * 2.0)) % 2 == 0)
     {
         int textWidth = MeasureText(playerNameBuffer, 20);
-        DrawText("_", 430 + textWidth, 171, 20, GREEN);
+        DrawText("_", (int)nameBox.x + 10 + textWidth, (int)nameBox.y + 6, 20, GREEN);
     }
 
-    Rectangle hostButton = { 370.0f, 220.0f, 220.0f, 44.0f };
-    Rectangle joinButton = { 690.0f, 220.0f, 220.0f, 44.0f };
     Color hostColor = (selection == MenuChoice::Host) ? SKYBLUE : DARKGRAY;
     Color joinColor = (selection == MenuChoice::Join) ? SKYBLUE : DARKGRAY;
 
@@ -136,37 +136,48 @@ void MenuScreen::Draw(const std::string& hostAddress)
     DrawRectangleLinesEx(hostButton, 2, RAYWHITE);
     DrawRectangleLinesEx(joinButton, 2, RAYWHITE);
     
-    DrawText("Host Game", (int)hostButton.x + 58, (int)hostButton.y + 12, 24, RAYWHITE);
-    DrawText("Join Game", (int)joinButton.x + 60, (int)joinButton.y + 12, 24, RAYWHITE);
+    int hostTextWidth = MeasureText("Host Game", 24);
+    int joinTextWidth = MeasureText("Join Game", 24);
+    DrawText("Host Game", (int)hostButton.x + (hostButton.width - hostTextWidth) / 2, (int)hostButton.y + 10, 24, RAYWHITE);
+    DrawText("Join Game", (int)joinButton.x + (joinButton.width - joinTextWidth) / 2, (int)joinButton.y + 10, 24, RAYWHITE);
 
     if (joinMode || selection == MenuChoice::Join)
     {
-        DrawText("Server address:", 350, 290, 20, RAYWHITE);
-        Rectangle box = { 350.0f, 320.0f, 580.0f, 40.0f };
-        DrawRectangleRec(box, Fade(RAYWHITE, 0.1f));
-        DrawRectangleLinesEx(box, 2, inputFocus == InputFocus::Address ? GREEN : RAYWHITE);
-        DrawText(addressBuffer, 360, 331, 20, GREEN);
+        const char* addrLabel = "Server address:";
+        int addrLabelWidth = MeasureText(addrLabel, 20);
+        DrawText(addrLabel, (WINDOW_WIDTH - addrLabelWidth) / 2, 350, 20, RAYWHITE);
+        
+        DrawRectangleRec(addressBox, Fade(RAYWHITE, 0.1f));
+        DrawRectangleLinesEx(addressBox, 2, inputFocus == InputFocus::Address ? GREEN : RAYWHITE);
+        DrawText(addressBuffer, (int)addressBox.x + 10, (int)addressBox.y + 10, 20, GREEN);
 
         if (inputFocus == InputFocus::Address && ((int)(GetTime() * 2.0)) % 2 == 0)
         {
             int textWidth = MeasureText(addressBuffer, 20);
-            DrawText("_", 360 + textWidth, 331, 20, GREEN);
+            DrawText("_", (int)addressBox.x + 10 + textWidth, (int)addressBox.y + 10, 20, GREEN);
         }
 
-        DrawText("Press ENTER to connect to the host.", 350, 380, 18, GRAY);
+        const char* joinHint = "Press ENTER to connect to the host.";
+        int joinHintWidth = MeasureText(joinHint, 18);
+        DrawText(joinHint, (WINDOW_WIDTH - joinHintWidth) / 2, 440, 18, GRAY);
     }
     else
     {
-        DrawText("Host on this machine and let friends connect to you.", 290, 290, 18, GRAY);
-        DrawText(TextFormat("Your LAN IP: %s:%d", hostAddress.c_str(), SERVER_PORT), 290, 330, 20, GREEN);
-        DrawText("Press ENTER to host a game or use H/J to switch modes.", 290, 365, 18, GRAY);
-        DrawText("Use a VPN or port-forward UDP 25665 if playing over the internet.", 290, 395, 18, GRAY);
+        const char* hostTxt1 = "Host on this machine and let friends connect to you.";
+        const char* hostTxt2 = TextFormat("Your LAN IP: %s:%d", hostAddress.c_str(), SERVER_PORT);
+        const char* hostTxt3 = "Press ENTER to host a game or use H/J to switch modes.";
+        const char* hostTxt4 = "Use a VPN or port-forward UDP 25665 if playing over the internet.";
+
+        DrawText(hostTxt1, (WINDOW_WIDTH - MeasureText(hostTxt1, 18)) / 2, 340, 18, GRAY);
+        DrawText(hostTxt2, (WINDOW_WIDTH - MeasureText(hostTxt2, 20)) / 2, 370, 20, GREEN);
+        DrawText(hostTxt3, (WINDOW_WIDTH - MeasureText(hostTxt3, 18)) / 2, 405, 18, GRAY);
+        DrawText(hostTxt4, (WINDOW_WIDTH - MeasureText(hostTxt4, 18)) / 2, 435, 18, GRAY);
     }
 
     if (statusMessage[0] != '\0')
     {
         int msgWidth = MeasureText(statusMessage, 18);
-        DrawText(statusMessage, (WINDOW_WIDTH - msgWidth) / 2, 470, 18, RED);
+        DrawText(statusMessage, (WINDOW_WIDTH - msgWidth) / 2, 480, 18, RED);
     }
 }
 

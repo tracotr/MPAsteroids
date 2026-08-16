@@ -35,12 +35,16 @@ namespace Models
         Texture2D shipTexture = LoadTexture("resources/models/player_ship/ShipTextureDiffuse.png");
         ShipModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = shipTexture;
         ShipBoxLocal = GetModelBoundingBox(ShipModel);
+        GenTextureMipmaps(&shipTexture);
+        SetTextureFilter(shipTexture, TEXTURE_FILTER_POINT);
 
         // Load asteroid model & texture
         AsteroidModel = LoadModel("resources/models/asteroid/asteroid.obj");
         Texture2D asteroidTexture = LoadTexture("resources/models/asteroid/AsteroidTextureDiffuse.png");
         AsteroidModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = asteroidTexture;
         AsteroidBoxLocal = GetModelBoundingBox(AsteroidModel);
+        GenTextureMipmaps(&asteroidTexture);
+        SetTextureFilter(asteroidTexture, TEXTURE_FILTER_POINT);
     }
 
     void DrawModel(Model model, const Vector3& position, const Matrix& rotation, float scale)
@@ -59,7 +63,7 @@ namespace Models
         rlEnableBackfaceCulling();
         rlEnableDepthMask();
     }
-
+    
     void DrawUI(Camera camera, Vector3 velocity, Vector3 position, int id, int (&scoreboard)[MAX_PLAYERS], char (&names)[MAX_PLAYERS][MAX_PLAYER_NAME_LENGTH])
     {
         DrawText(TextFormat("Velocity: %03.03f", Vector3LengthSqr(velocity)), 20, 20, 20, RAYWHITE);

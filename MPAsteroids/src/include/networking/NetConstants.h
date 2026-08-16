@@ -25,9 +25,11 @@ enum NetworkCommands
     DestroyAsteroid = 7,
     UpdateScoreboard = 8,
     ResetScoreboardId = 9,
+    FireProjectile = 10,
 };
 
 #pragma pack(push, 1)
+
 struct PlayerPacket
 {
     int Command;
@@ -67,5 +69,13 @@ struct ScoreboardPacket
     int Scoreboard[MAX_PLAYERS];
     char Names[MAX_PLAYERS][MAX_PLAYER_NAME_LENGTH];
     int Id;
+};
+
+struct ProjectilePacket
+{
+    int Command;
+    int PlayerID;
+    Vector3 Position;
+    Vector3 Velocity;
 };
 #pragma pack(pop)
