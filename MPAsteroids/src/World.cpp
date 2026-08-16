@@ -26,7 +26,7 @@ void World::Reset()
     PlayerShip.Reset();
 }
 
-void World::Update(double delta, Camera3D camera)
+void World::Update(double delta)
 {
     Player& PlayerShip = GameApp::GetInstance()->GetPlayer();
     NetClient& Net = GameApp::GetInstance()->GetNet();
@@ -49,7 +49,7 @@ void World::Update(double delta, Camera3D camera)
     Net.UpdateLocalPlayer(PlayerShip.Position, PlayerShip.Rotation);
     Net.NetUpdate(GetTime(), delta);
     CreateAsteroidCollision();
-    CheckCollisions(camera);
+    CheckCollisions();
 }
 
 void World::Draw()
@@ -87,11 +87,13 @@ void World::DrawUI()
         }
     }
 
-    DrawPlayerIndicators(camera, otherPlayersData, GetScreenWidth(), GetScreenHeight());
+    DrawPlayerIndicators(otherPlayersData, GetScreenWidth(), GetScreenHeight());
 }
 
 
-void World::DrawPlayerIndicators(Camera3D camera, const std::vector<std::pair<Vector3, std::string>>& otherPlayersData, int screenWidth, int screenHeight) {
+void World::DrawPlayerIndicators(const std::vector<std::pair<Vector3, std::string>>& otherPlayersData, int screenWidth, int screenHeight) {
+    Camera3D camera = GameApp::GetInstance()->GetCamera();
+
     Vector2 screenCenter = { (float)screenWidth / 2.0f, (float)screenHeight / 2.0f };
     float edgeMargin = 40.0f;
 
@@ -270,7 +272,7 @@ void World::CreateAsteroidCollision()
     }
 }
 
-void World::CheckShipCollisions(BoundingBox asteroidBox, Camera3D camera)
+void World::CheckShipCollisions(BoundingBox asteroidBox)
 {
     Player& PlayerShip = GameApp::GetInstance()->GetPlayer();
     NetClient& Net = GameApp::GetInstance()->GetNet();
@@ -282,7 +284,7 @@ void World::CheckShipCollisions(BoundingBox asteroidBox, Camera3D camera)
     {
         Vector3 hitPosition = PlayerShip.Position;
         PlayerShip.Respawn();
-        Sounds::PlayHurt(hitPosition, PlayerShip.Position, camera);
+        Sounds::PlayHurt(hitPosition, PlayerShip.Position);
         Net.HandlePlayerCollision();
     }
 }

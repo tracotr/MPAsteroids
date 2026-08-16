@@ -1,10 +1,16 @@
 #pragma once
+
 #include "Entity.h"
 #include "Player.h"
 #include "Models.h"
 #include "NetClient.h"
 #include "Sounds.h"
+
 #include "networking/NetConstants.h"
+
+#include <utility>
+#include <string>
+#include <vector>
 
 struct Projectile {
     bool active = false;
@@ -26,7 +32,8 @@ public:
     
     void DrawAsteroidModels();
     void DrawUI();
-    
+    void DrawPlayerIndicators(const std::vector<std::pair<Vector3, std::string>>& otherPlayersData, int screenWidth, int screenHeight);
+
     void UpdateProjectiles(double delta);
     
     void FireProjectile(Vector3 position, Vector3 velocity);
