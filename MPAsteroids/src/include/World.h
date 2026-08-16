@@ -41,7 +41,7 @@ public:
     void DrawProjectiles();
     void CheckProjectileCollisions();
     void CreateAsteroidCollision();
-    void CheckShipCollisions(BoundingBox asteroidBox);
+    void CheckShipCollisions(BoundingBox asteroidBox, int asteroidId);
     void CheckCollisions();
 
     Projectile Projectiles[MAX_PROJECTILES];

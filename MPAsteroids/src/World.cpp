@@ -272,7 +272,7 @@ void World::CreateAsteroidCollision()
     }
 }
 
-void World::CheckShipCollisions(BoundingBox asteroidBox)
+void World::CheckShipCollisions(BoundingBox asteroidBox, int asteroidId)
 {
     Player& PlayerShip = GameApp::GetInstance()->GetPlayer();
     NetClient& Net = GameApp::GetInstance()->GetNet();
@@ -285,7 +285,13 @@ void World::CheckShipCollisions(BoundingBox asteroidBox)
         Vector3 hitPosition = PlayerShip.Position;
         PlayerShip.Respawn();
         Sounds::PlayHurt(hitPosition, PlayerShip.Position);
+        
         Net.HandlePlayerCollision();
+
+        Net.HandleDestroyAsteroid(Net.GetLocalPlayerId(), asteroidId);
+        
+        AsteroidBoundingBoxes[asteroidId].min = { 0.0f, 0.0f, 0.0f };
+        AsteroidBoundingBoxes[asteroidId].max = { 0.0f, 0.0f, 0.0f };
     }
 }
 
@@ -295,7 +301,7 @@ void World::CheckCollisions()
 
     for(int i = 0; i < Net.GetMaxAsteroids(); i++)
     {
-        CheckShipCollisions(AsteroidBoundingBoxes[i]);
+        CheckShipCollisions(AsteroidBoundingBoxes[i], i);
     }
     
     CheckProjectileCollisions();
