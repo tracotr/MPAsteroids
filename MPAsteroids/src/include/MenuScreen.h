@@ -37,4 +37,9 @@ private:
     MenuChoice selection;
     InputFocus inputFocus;
     bool joinMode;
+
+    Rectangle nameBox;
+    Rectangle addressBox;
+    Rectangle hostButton;
+    Rectangle joinButton;
 };

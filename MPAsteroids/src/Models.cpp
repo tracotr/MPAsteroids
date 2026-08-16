@@ -59,7 +59,7 @@ namespace Models
         rlEnableBackfaceCulling();
         rlEnableDepthMask();
     }
-
+    
     void DrawUI(Camera camera, Vector3 velocity, Vector3 position, int id, int (&scoreboard)[MAX_PLAYERS], char (&names)[MAX_PLAYERS][MAX_PLAYER_NAME_LENGTH])
     {
         DrawText(TextFormat("Velocity: %03.03f", Vector3LengthSqr(velocity)), 20, 20, 20, RAYWHITE);

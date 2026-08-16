@@ -1,6 +1,7 @@
 #include "include/Player.h"
 #include "include/Models.h"
 #include "include/Sounds.h"
+#include "include/GameApp.h"
 #include <iostream>
 
 void Player::Update(double delta)
@@ -9,7 +10,7 @@ void Player::Update(double delta)
     if (thrusting && !boosterActive)
     {
         boosterActive = true;
-        Sounds::PlayBooster(Position, Position);
+        Sounds::PlayBooster(Position, Position); 
     }
     else if (!thrusting && boosterActive)
     {
@@ -23,16 +24,17 @@ void Player::Update(double delta)
 
     // Shooting controls
     // ----------------------
+    isFiring = false;
     if (IsKeyDown(KEY_SPACE))
     {
         if(laserCooldown >= LASER_COOLDOWN_DURATION)
         {
             laserCooldown = 0;
             Sounds::PlayLaser(Position, Position);
+            isFiring = true;
         }
-        isFiring = (laserCooldown == 0) ? true: false;
     }
-
+    
     // Rotation controls
     // ----------------------
     float currentRotationSpeed = RotationSpeed;

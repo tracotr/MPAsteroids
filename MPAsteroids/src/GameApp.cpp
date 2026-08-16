@@ -7,8 +7,17 @@
 #include "include/raylib/rcamera.h"
 #include <cstdio>
 
+
+GameApp* GameApp::instance = nullptr;
+
 GameApp::GameApp() : state(AppState::Menu), connectStartTime(0.0)
 {
+    instance = this;
+}
+
+GameApp* GameApp::GetInstance()
+{
+    return instance;
 }
 
 void GameApp::Initialize()
@@ -62,15 +71,14 @@ void GameApp::Shutdown()
 void GameApp::ProcessMenu()
 {
     MenuAction action = menu.Update();
-    World& world = World::Create();
 
     if (action == MenuAction::StartHost)
     {
         if (hostedServer.Start())
         {
-            if (world.Net.NetConnect("127.0.0.1", menu.GetPlayerName()))
+            if (Net.NetConnect("127.0.0.1", menu.GetPlayerName()))
             {
-                world.Net.BeginHostedSession(menu.GetPlayerName());
+                Net.BeginHostedSession(menu.GetPlayerName());
                 connectStartTime = GetTime();
                 state = AppState::Playing;
             }
@@ -87,7 +95,7 @@ void GameApp::ProcessMenu()
     }
     else if (action == MenuAction::StartJoin)
     {
-        if (world.Net.NetConnect(menu.GetAddress(), menu.GetPlayerName()))
+        if (Net.NetConnect(menu.GetAddress(), menu.GetPlayerName()))
         {
             connectStartTime = GetTime();
             menu.SetStatusMessage("");
@@ -107,10 +115,9 @@ void GameApp::ProcessMenu()
 
 void GameApp::ProcessConnecting()
 {
-    World& world = World::Create();
-    world.Net.NetUpdate(GetTime(), GetFrameTime());
+    Net.NetUpdate(GetTime(), GetFrameTime());
 
-    if (world.Net.GetLocalPlayerId() != -1)
+    if (Net.GetLocalPlayerId() != -1)
     {
         DisableCursor();
         state = AppState::Playing;
@@ -144,22 +151,21 @@ void GameApp::ProcessPlaying()
         BeginMode3D(camera);
         world.Draw();
         EndMode3D();
-        world.DrawUI(camera);
+        world.DrawUI();
     EndDrawing();
 }
 
 void GameApp::UpdateCamera()
 {
-    Player& playerShip = World::Create().PlayerShip;
-    Vector3 forwardVector = Vector3Transform(CAMERA_OFFSET, playerShip.Rotation);
-    Vector3 offsetVector = Vector3Add(forwardVector, playerShip.Position);
-    Vector3 upVector = Vector3Transform(CAMERA_UP, playerShip.Rotation);
+    Vector3 forwardVector = Vector3Transform(CAMERA_OFFSET, PlayerShip.Rotation);
+    Vector3 offsetVector = Vector3Add(forwardVector, PlayerShip.Position);
+    Vector3 upVector = Vector3Transform(CAMERA_UP, PlayerShip.Rotation);
 
     camera.position = Vector3Lerp(camera.position, offsetVector, 0.1f);
-    camera.target = playerShip.Position;
+    camera.target = PlayerShip.Position;
     camera.up = upVector;
 
-    float speedRatio = Clamp(Vector3LengthSqr(playerShip.Velocity) / playerShip.MaxSpeed, 0.0f, 1.0f);
+    float speedRatio = Clamp(Vector3LengthSqr(PlayerShip.Velocity) / PlayerShip.MaxSpeed, 0.0f, 1.0f);
     float targetFOV = Lerp(90, 110, speedRatio);
     camera.fovy = Lerp(camera.fovy, targetFOV, 0.1f);
 }

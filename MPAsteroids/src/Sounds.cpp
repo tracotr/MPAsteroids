@@ -1,10 +1,11 @@
 #include "include/Sounds.h"
+#include "include/GameApp.h"
 
 #include <cstdio>
 
 namespace Sounds
 {
-    float MasterVolume = DEFAULT_MASTER_VOLUME;
+    float MasterVolume = 0.3f;
     Sound LaserSounds[LASER_SOUND_COUNT] = { 0 };
     Sound ExplosionSounds[EXPLOSION_SOUND_COUNT] = { 0 };
     Sound HurtSounds[HURT_SOUND_COUNT] = { 0 };
@@ -21,14 +22,21 @@ namespace Sounds
 
     static void ApplySpatialMix(Sound sound, Vector3 sourcePosition, Vector3 listenerPosition)
     {
+        Camera3D camera = GameApp::GetInstance()->GetCamera();
+        
         Vector3 delta = Vector3Subtract(sourcePosition, listenerPosition);
         float distance = Vector3Length(delta);
 
         float pan = 0.5f;
         if (distance > 0.0001f)
         {
-            float normalizedX = Clamp(delta.x / distance, -1.0f, 1.0f);
-            pan = 0.5f + (normalizedX * 0.5f);
+            // Get the camera's right vector
+            Vector3 forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+            Vector3 right = Vector3Normalize(Vector3CrossProduct(forward, camera.up));
+            
+            // Project sound direction onto camera's right vector
+            float dotRight = Vector3DotProduct(Vector3Normalize(delta), right);
+            pan = 0.5f + (dotRight * 0.5f);
         }
 
         float spatialVolume = Clamp(1.0f / (1.0f + distance * 0.12f), 0.0f, 1.0f);

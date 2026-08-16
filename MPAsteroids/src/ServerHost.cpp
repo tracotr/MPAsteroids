@@ -10,6 +10,8 @@
 #include <string>
 #include <thread>
 
+#define BASE_SCORE 5
+
 const double SERVER_TICK_RATE = 30.0;
 const double SERVER_TICK_INTERVAL = 1.0 / SERVER_TICK_RATE;
 
@@ -80,6 +82,8 @@ private:
     AsteroidInfo asteroids[MAX_ASTEROIDS] = {};
     int asteroidAmount = 0;
 
+    double asteroidHitCooldown[MAX_ASTEROIDS] = { 0.0 };
+
     static double GetClockSeconds()
     {
         return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -110,20 +114,29 @@ private:
             asteroids[asteroidAmount++] = CreateAsteroid();
     }
 
-    void BreakAsteroid(int id)
+    bool BreakAsteroid(int id)
     {
         if (id < 0 || id >= asteroidAmount)
-            return;
+            return false;
+
+        double now = GetClockSeconds();
+        if (now - asteroidHitCooldown[id] < 0.1) 
+            return false; 
+
+        asteroidHitCooldown[id] = now;
 
         AsteroidInfo& asteroid = asteroids[id];
+
         if (asteroid.Scale <= MIN_ASTEROID_SCALE)
         {
             asteroids[id] = CreateAsteroid();
-            return;
+            return true;
         }
 
         float splitScale = asteroid.Scale * 0.7f;
+
         Vector3 tangent = Vector3Normalize((Vector3){ asteroid.Velocity.z, asteroid.Velocity.y, -asteroid.Velocity.x });
+
         if (Vector3LengthSqr(tangent) < 0.0001f)
             tangent = (Vector3){ 1.0f, 0.0f, 0.0f };
 
@@ -131,12 +144,16 @@ private:
 
         AsteroidInfo leftAsteroid = asteroid;
         AsteroidInfo rightAsteroid = asteroid;
+
         leftAsteroid.Scale = splitScale;
         rightAsteroid.Scale = splitScale;
+
         leftAsteroid.Position = Vector3Add(asteroid.Position, splitOffset);
         rightAsteroid.Position = Vector3Subtract(asteroid.Position, splitOffset);
+
         leftAsteroid.Velocity = Vector3Add(asteroid.Velocity, Vector3Scale(tangent, 1.75f));
         rightAsteroid.Velocity = Vector3Subtract(asteroid.Velocity, Vector3Scale(tangent, 1.75f));
+
         leftAsteroid.Active = true;
         rightAsteroid.Active = true;
 
@@ -144,12 +161,15 @@ private:
         {
             asteroids[id] = leftAsteroid;
             asteroids[asteroidAmount] = rightAsteroid;
+            asteroidHitCooldown[asteroidAmount] = now;
             asteroidAmount += 1;
         }
         else
         {
             asteroids[id] = CreateAsteroid();
         }
+        
+        return true;
     }
 
     void SendPacketToAllBut(ENetPacket* packet, int exceptPlayerId, int channel)
@@ -364,7 +384,6 @@ private:
                             memcpy(&received, event.packet->data, sizeof(PlayerPacket));
                             int playerId = GetPlayerId(event.peer);
                             
-                            // Player should already be initialized from CONNECT event
                             if (playerId == -1)
                             {
                                 enet_peer_disconnect(event.peer, 0);
@@ -401,13 +420,16 @@ private:
                         {
                             AsteroidDestroyPacket received = {};
                             memcpy(&received, event.packet->data, sizeof(AsteroidDestroyPacket));
+
                             if (received.Command == static_cast<int>(NetworkCommands::DestroyAsteroid))
                             {
                                 if (received.AsteroidID >= 0 && received.AsteroidID < asteroidAmount)
                                 {
-                                    BreakAsteroid(received.AsteroidID);
-                                    players[received.PlayerID].Score += 5;
-                                    UpdateScoreboard();
+                                    if (BreakAsteroid(received.AsteroidID)) 
+                                    {
+                                        players[received.PlayerID].Score += BASE_SCORE;
+                                        UpdateScoreboard();
+                                    }
                                 }
                             }
                         }
@@ -426,6 +448,18 @@ private:
                                     }
                                 }
                                 UpdateScoreboard();
+                            }
+                        }
+                        else if (event.packet->dataLength == sizeof(ProjectilePacket))
+                        {
+                            ProjectilePacket received = {};
+                            memcpy(&received, event.packet->data, sizeof(ProjectilePacket));
+
+                            if (received.Command == static_cast<int>(NetworkCommands::FireProjectile))
+                            {
+                                // send the projectile event to all other clients
+                                ENetPacket* packet = enet_packet_create(&received, sizeof(ProjectilePacket), ENET_PACKET_FLAG_RELIABLE);
+                                SendPacketToAllBut(packet, received.PlayerID, 0);
                             }
                         }
 

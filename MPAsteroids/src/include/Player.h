@@ -6,12 +6,13 @@ class Player : public Entity
 {
 public:
     double laserCooldown = 0.0;
-    const double LASER_COOLDOWN_DURATION = 0.75;
+    const float LASER_SPEED = 30.0f;
+    const double LASER_COOLDOWN_DURATION = 0.25;
     bool isFiring = false;
     bool boosterActive = false;
 
-    // need to update and draw player
-    void Update(double delta) override;
+    // update and draw player
+    virtual void Update(double delta) override;
     void Draw() override;
 
     // functions to reset player
