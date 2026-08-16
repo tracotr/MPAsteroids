@@ -3,11 +3,11 @@
 #include "../raylib/raymath.h"
 
 #define MAX_PLAYERS 5
-#define MAX_ASTEROIDS 48
-#define MAX_ASTEROID_DIST 27.0f
+#define MAX_ASTEROIDS 256
+#define MAX_ASTEROID_DIST 22.0f
 #define MAX_SQR_V3 3.402823466e+38F
 #define MAX_PLAYER_NAME_LENGTH 16
-#define MIN_ASTEROID_SCALE 0.35f
+#define MIN_ASTEROID_SCALE 0.5f
 
 #define SCREEN_WIDTH 1280
 #define SCREEN_HEIGHT 720

@@ -88,7 +88,7 @@ bool NetClient::NetConnect(const char* serverAddress, const char* playerName)
     announce.Position = (Vector3){ 0.0f, 0.0f, 0.0f };
     announce.Rotation = MatrixIdentity();
 
-    ENetPacket* packet = enet_packet_create(&announce, sizeof(announce), ENET_PACKET_FLAG_RELIABLE);
+    ENetPacket* packet = enet_packet_create(&announce, sizeof(announce), 0);
     enet_peer_send(Server, 2, packet);
 
     return true;
@@ -124,7 +124,9 @@ void NetClient::HandleAddPlayer(PlayerPacket packet)
 	Players[remotePlayer].Active = true;
     CopySafeName(Players[remotePlayer].Name, sizeof(Players[remotePlayer].Name), packet.Name);
     CopySafeName(PlayerNames[remotePlayer], sizeof(PlayerNames[remotePlayer]), packet.Name);
+
 	Players[remotePlayer].Position = packet.Position;
+    Players[remotePlayer].TargetPosition = packet.Position;
 	Players[remotePlayer].Rotation = packet.Rotation;
 	Players[remotePlayer].LastUpdateTime = LastNow;
 }
@@ -158,8 +160,9 @@ void NetClient::HandleUpdatePlayer(PlayerPacket packet)
 	// update the last known position and movement
     CopySafeName(Players[remotePlayer].Name, sizeof(Players[remotePlayer].Name), packet.Name);
     CopySafeName(PlayerNames[remotePlayer], sizeof(PlayerNames[remotePlayer]), packet.Name);
-	Players[remotePlayer].Position = packet.Position;
-	Players[remotePlayer].Rotation = packet.Rotation;
+
+	Players[remotePlayer].TargetPosition = packet.Position;
+    Players[remotePlayer].Rotation = packet.Rotation;
 	Players[remotePlayer].LastUpdateTime = LastNow;
 }
 
@@ -258,6 +261,24 @@ void NetClient::NetUpdate(double now, float delta)
     if (Server == NULL)
         return;
 
+    for (int i = 0; i < AsteroidAmount; i++)
+    {
+        Asteroids[i].Position.x += Asteroids[i].Velocity.x * delta;
+        Asteroids[i].Position.y += Asteroids[i].Velocity.y * delta;
+        Asteroids[i].Position.z += Asteroids[i].Velocity.z * delta;
+    }
+
+    for (int i = 0; i < MAX_PLAYERS; i++)
+    {
+        if (i != LocalPlayerId && Players[i].Active)
+        {
+            float lerpSpeed = 10.0f; // Higher = snappier, Lower = floatier
+            Players[i].Position.x += (Players[i].TargetPosition.x - Players[i].Position.x) * lerpSpeed * delta;
+            Players[i].Position.y += (Players[i].TargetPosition.y - Players[i].Position.y) * lerpSpeed * delta;
+            Players[i].Position.z += (Players[i].TargetPosition.z - Players[i].Position.z) * lerpSpeed * delta;
+        }
+    }
+
     // if we're in a server send packet to server
     if(LocalPlayerId >= 0 && now - LastInputSend > UPDATE_INTERVAL)
     {
@@ -319,7 +340,7 @@ void NetClient::NetUpdate(double now, float delta)
                     // We do not have an ID in the server, so we need to read the accept command
                     else 
                     {
-                        if (recieved.Command != NetworkCommands::AcceptPlayer) // Command SHOULD be accept player, but skip if it's not
+                        if (recieved.Command != NetworkCommands::AcceptPlayer)
                             return;
 
                         // Read id from command, check if in bounds, and prepare it to be in the game.

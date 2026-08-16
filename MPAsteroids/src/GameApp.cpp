@@ -81,6 +81,7 @@ void GameApp::ProcessMenu()
                 Net.BeginHostedSession(menu.GetPlayerName());
                 connectStartTime = GetTime();
                 state = AppState::Playing;
+                menu.SetStatusMessage("");
             }
             else
             {
@@ -143,7 +144,7 @@ void GameApp::ProcessConnecting()
 void GameApp::ProcessPlaying()
 {
     World& world = World::Create();
-    world.Update(GetFrameTime());
+    world.Update(GetFrameTime(), camera);
     UpdateCamera();
 
     BeginDrawing();

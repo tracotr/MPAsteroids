@@ -302,6 +302,11 @@ private:
 
     void UpdateAsteroids(double delta)
     {
+        if (asteroidAmount < 10)
+        {
+            SpawnAsteroids(1);
+        }
+
         for (int i = 0; i < asteroidAmount; ++i)
         {
             AsteroidInfo& asteroid = asteroids[i];
@@ -338,13 +343,22 @@ private:
                 asteroid.Position.z = closestPos.z + MAX_ASTEROID_DIST;
         }
 
-        AsteroidInfoPacket buffer = {};
-        buffer.Command = static_cast<int>(NetworkCommands::UpdateAsteroid);
-        memcpy(buffer.AllAsteroids, asteroids, sizeof(asteroids));
-        buffer.AsteroidCount = asteroidAmount;
+        static int networkTickCounter = 0;
+        networkTickCounter++;
 
-        ENetPacket* packet = enet_packet_create(&buffer, sizeof(buffer), ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT);
-        SendPacketToAllBut(packet, -1, 1);
+        // Broadcast network data only 5 times a second (30Hz / 6)
+        if (networkTickCounter >= 6) 
+        {
+            AsteroidInfoPacket buffer = {};
+            buffer.Command = static_cast<int>(NetworkCommands::UpdateAsteroid);
+            memcpy(buffer.AllAsteroids, asteroids, sizeof(asteroids));
+            buffer.AsteroidCount = asteroidAmount;
+
+            ENetPacket* packet = enet_packet_create(&buffer, sizeof(buffer), ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT);
+            SendPacketToAllBut(packet, -1, 1);
+            
+            networkTickCounter = 0;
+        }
     }
 
     void Run()

@@ -20,6 +20,7 @@ private:
         char Name[MAX_PLAYER_NAME_LENGTH] = { 0 };
 
         Vector3 Position;
+        Vector3 TargetPosition;
         Matrix Rotation;
 
         double LastUpdateTime;

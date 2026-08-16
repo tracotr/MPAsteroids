@@ -4,7 +4,7 @@
 #include "include/GameApp.h"
 #include <iostream>
 
-void Player::Update(double delta)
+void Player::Update(double delta, Camera3D camera)
 {   
     bool thrusting = IsKeyDown(KEY_R) || IsKeyDown(KEY_F);
     if (thrusting && !boosterActive)

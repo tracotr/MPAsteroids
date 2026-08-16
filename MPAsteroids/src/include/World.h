@@ -23,6 +23,7 @@ public:
     void Update(double delta);
     void Draw();
     void DrawPlayerModels();
+    
     void DrawAsteroidModels();
     void DrawUI();
     

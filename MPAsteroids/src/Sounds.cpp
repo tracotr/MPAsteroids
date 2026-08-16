@@ -20,14 +20,14 @@ namespace Sounds
         (void)frames;
     }
 
-    static void ApplySpatialMix(Sound sound, Vector3 sourcePosition, Vector3 listenerPosition)
+    static void ApplySpatialMix(Sound sound, Vector3 sourcePosition, Vector3 listenerPosition, Camera3D camera)
     {
         Camera3D camera = GameApp::GetInstance()->GetCamera();
         
         Vector3 delta = Vector3Subtract(sourcePosition, listenerPosition);
         float distance = Vector3Length(delta);
-
         float pan = 0.5f;
+
         if (distance > 0.0001f)
         {
             // Get the camera's right vector
@@ -47,13 +47,13 @@ namespace Sounds
         SetSoundPitch(sound, 1.0f + Clamp(distance * 0.02f, 0.0f, 0.4f));
     }
 
-    static void PlayRandomSound(const Sound* sounds, int count, Vector3 sourcePosition, Vector3 listenerPosition)
+    static void PlayRandomSound(const Sound* sounds, int count, Vector3 sourcePosition, Vector3 listenerPosition, Camera3D camera)
     {
         if (sounds == nullptr || count <= 0)
             return;
 
         int index = GetRandomValue(0, count - 1);
-        ApplySpatialMix(sounds[index], sourcePosition, listenerPosition);
+        ApplySpatialMix(sounds[index], sourcePosition, listenerPosition, camera);
         PlaySound(sounds[index]);
     }
 
@@ -133,36 +133,36 @@ namespace Sounds
         Deinit();
     }
 
-    void PlayLaser(Vector3 sourcePosition, Vector3 listenerPosition)
+    void PlayLaser(Vector3 sourcePosition, Vector3 listenerPosition, Camera3D camera)
     {
         if (!g_initialized)
             return;
 
-        PlayRandomSound(LaserSounds, LASER_SOUND_COUNT, sourcePosition, listenerPosition);
+        PlayRandomSound(LaserSounds, LASER_SOUND_COUNT, sourcePosition, listenerPosition, camera);
     }
 
-    void PlayExplosion(Vector3 sourcePosition, Vector3 listenerPosition)
+    void PlayExplosion(Vector3 sourcePosition, Vector3 listenerPosition, Camera3D camera)
     {
         if (!g_initialized)
             return;
 
-        PlayRandomSound(ExplosionSounds, EXPLOSION_SOUND_COUNT, sourcePosition, listenerPosition);
+        PlayRandomSound(ExplosionSounds, EXPLOSION_SOUND_COUNT, sourcePosition, listenerPosition, camera);
     }
 
-    void PlayHurt(Vector3 sourcePosition, Vector3 listenerPosition)
+    void PlayHurt(Vector3 sourcePosition, Vector3 listenerPosition, Camera3D camera)
     {
         if (!g_initialized)
             return;
 
-        PlayRandomSound(HurtSounds, HURT_SOUND_COUNT, sourcePosition, listenerPosition);
+        PlayRandomSound(HurtSounds, HURT_SOUND_COUNT, sourcePosition, listenerPosition, camera);
     }
 
-    void PlayBooster(Vector3 sourcePosition, Vector3 listenerPosition)
+    void PlayBooster(Vector3 sourcePosition, Vector3 listenerPosition, Camera3D camera)
     {
         if (!g_initialized || !IsSoundValid(BoosterSound))
             return;
 
-        ApplySpatialMix(BoosterSound, sourcePosition, listenerPosition);
+        ApplySpatialMix(BoosterSound, sourcePosition, listenerPosition, camera);
         if (!IsSoundPlaying(BoosterSound))
             PlaySound(BoosterSound);
     }
