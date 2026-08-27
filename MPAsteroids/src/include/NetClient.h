@@ -1,15 +1,19 @@
 #pragma once
-#define ENET_IMPLEMENTATION
 
 #include "raylib/raymath.h"
-
 #include "networking/NetConstants.h"
 
+#include <cstdint>
 #include <stdio.h>
 
-bool EnsureENetReady();
-
 #define MAX_PROJECTILES 100
+
+enum class NetStatus
+{
+    Disconnected,
+    Connecting,
+    Connected
+};
 
 class NetClient
 {
@@ -34,7 +38,7 @@ private:
     int Scoreboard[MAX_PLAYERS] = { 0 };
 
     // last time we updated
-    double LastNow = 0; 
+    double LastNow = 0;
     // how long in seconds since the last time we sent an update
     double LastInputSend = -100;
 
@@ -43,6 +47,11 @@ private:
 
     AsteroidInfo Asteroids[MAX_ASTEROIDS];
     int AsteroidAmount = 0;
+
+    NetStatus Status = NetStatus::Disconnected;
+
+    void DispatchPacket(const uint8_t* data, size_t length);
+    void SendPacket(const void* data, size_t length);
 
 public:
     struct RemoteProjectileEvent {
@@ -68,9 +77,15 @@ public:
     void SendProjectile(Vector3 position, Vector3 velocity);
 
     bool NetConnect(const char* address, const char* playerName = nullptr);
-    void BeginHostedSession(const char* playerName);
+    void NetDisconnect();
     void NetUpdate(double now, float delta);
 
+    // Called from the WebSocket event callbacks.
+    void OnSocketOpen();
+    void OnSocketClosed();
+    void OnSocketMessage(const uint8_t* data, size_t length);
+
+    NetStatus GetStatus() const { return Status; }
     int GetLocalPlayerId() { return LocalPlayerId; };
     const char* GetLocalPlayerName() const { return LocalPlayerName; }
     const char* GetPlayerName(int id) const { return (id >= 0 && id < MAX_PLAYERS) ? PlayerNames[id] : ""; }
@@ -78,4 +93,3 @@ public:
     int (&GetScoreboard())[MAX_PLAYERS] { return Scoreboard; };
     char (&GetPlayerNames())[MAX_PLAYERS][MAX_PLAYER_NAME_LENGTH] { return PlayerNames; }
 };
-

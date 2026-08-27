@@ -73,7 +73,7 @@ void Player::Update(double delta)
     }
 
     // Apply friction to slow ship
-	Vector3 friction = Vector3Scale(Vector3Normalize(Velocity), -2.5f * GetFrameTime());
+	Vector3 friction = Vector3Scale(Vector3Normalize(Velocity), -2.5f * (float)delta);
 
     // Apply friction to our velocity, and eventually stop ship
 	if (Vector3LengthSqr(friction) < Vector3LengthSqr(Velocity))
@@ -83,7 +83,7 @@ void Player::Update(double delta)
 
 
     // Update position based off velocity
-    Position = Vector3Add(Position, Vector3Scale(Velocity, GetFrameTime()));
+    Position = Vector3Add(Position, Vector3Scale(Velocity, (float)delta));
 
     if (IsKeyDown(KEY_Y)) Reset();
 }

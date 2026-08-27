@@ -72,34 +72,37 @@ void World::DrawUI()
 
     Models::DrawUI(camera, PlayerShip.Velocity, PlayerShip.Position, Net.GetLocalPlayerId(), Net.GetScoreboard(), Net.GetPlayerNames());
 
-    auto playerNames = Net.GetPlayerNames();
-    std::vector<std::pair<Vector3, std::string>> otherPlayersData;
+    auto& playerNames = Net.GetPlayerNames();
+    PlayerIndicator otherPlayersData[MAX_PLAYERS];
+    int otherPlayerCount = 0;
     for (int i = 0; i < MAX_PLAYERS; i++)
     {
         if (i == Net.GetLocalPlayerId()) continue;
 
         Vector3 pos = { 0.0f, 0.0f, 0.0f };
         Matrix rot = MatrixIdentity();
-        
+
         if (Net.GetPlayerSpatial(i, &pos, &rot))
         {
-            otherPlayersData.push_back({pos, playerNames[i]});
+            otherPlayersData[otherPlayerCount].position = pos;
+            otherPlayersData[otherPlayerCount].name = playerNames[i];
+            otherPlayerCount++;
         }
     }
 
-    DrawPlayerIndicators(otherPlayersData, GetScreenWidth(), GetScreenHeight());
+    DrawPlayerIndicators(otherPlayersData, otherPlayerCount, GetScreenWidth(), GetScreenHeight());
 }
 
 
-void World::DrawPlayerIndicators(const std::vector<std::pair<Vector3, std::string>>& otherPlayersData, int screenWidth, int screenHeight) {
+void World::DrawPlayerIndicators(const PlayerIndicator* otherPlayersData, int otherPlayerCount, int screenWidth, int screenHeight) {
     Camera3D camera = GameApp::GetInstance()->GetCamera();
 
     Vector2 screenCenter = { (float)screenWidth / 2.0f, (float)screenHeight / 2.0f };
     float edgeMargin = 40.0f;
 
-    for (const auto& playerData : otherPlayersData) {
-        Vector3 targetPos = playerData.first;
-        const char* playerName = playerData.second.c_str();
+    for (int i = 0; i < otherPlayerCount; i++) {
+        Vector3 targetPos = otherPlayersData[i].position;
+        const char* playerName = otherPlayersData[i].name;
 
         float distance = Vector3Distance(camera.position, targetPos);
         Vector2 screenPos = GetWorldToScreen(targetPos, camera);

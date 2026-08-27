@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>MP Asteroids</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+    <meta name="description" content="MP Asteroids - a multiplayer space shooter">
+
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+        font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+      }
+
+      #game-container {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      /* Canvas must have no border/padding or mouse coords get offset. */
+      canvas#canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        border: 0 none;
+        background: #000;
+        outline: none;
+      }
+
+      #loading {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        color: #e6e6e6;
+        background: #000;
+        transition: opacity 0.4s ease;
+      }
+
+      #loading.hidden { opacity: 0; pointer-events: none; }
+
+      #loading-title { font-size: 28px; letter-spacing: 6px; font-weight: 600; }
+      #loading-status { font-size: 14px; color: #8a8a8a; }
+
+      .spinner {
+        width: 34px;
+        height: 34px;
+        border: 3px solid #2a2a2a;
+        border-top-color: #e6e6e6;
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+      }
+
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      @media (prefers-reduced-motion: reduce) {
+        .spinner { animation-duration: 3s; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="game-container">
+      <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+
+      <div id="loading">
+        <div id="loading-title">MP ASTEROIDS</div>
+        <div class="spinner"></div>
+        <div id="loading-status">Loading...</div>
+      </div>
+    </div>
+
+    <script type="text/javascript">
+      var statusElement = document.querySelector('#loading-status');
+      var loadingElement = document.querySelector('#loading');
+
+      var Module = {
+        print: function (text) { console.log(text); },
+        printErr: function (text) { console.error(text); },
+        canvas: (function () {
+          var canvas = document.querySelector('#canvas');
+          canvas.addEventListener('webglcontextlost', function (e) {
+            e.preventDefault();
+            statusElement.textContent = 'Graphics context lost - please reload the page.';
+            loadingElement.classList.remove('hidden');
+          }, false);
+          return canvas;
+        })(),
+        setStatus: function (text) {
+          if (!statusElement) return;
+          statusElement.textContent = text || '';
+        },
+        totalDependencies: 0,
+        monitorRunDependencies: function (left) {
+          this.totalDependencies = Math.max(this.totalDependencies, left);
+          Module.setStatus(
+            left
+              ? 'Loading... (' + (this.totalDependencies - left) + '/' + this.totalDependencies + ')'
+              : 'Starting...'
+          );
+        },
+        onRuntimeInitialized: function () {
+          loadingElement.classList.add('hidden');
+        }
+      };
+
+      window.onerror = function () {
+        Module.setStatus('Something went wrong - see the browser console.');
+      };
+    </script>
+
+    {{{ SCRIPT }}}
+  </body>
+</html>

@@ -8,15 +8,16 @@
 
 #include "networking/NetConstants.h"
 
-#include <utility>
-#include <string>
-#include <vector>
-
 struct Projectile {
     bool active = false;
     Vector3 position;
     Vector3 velocity;
     float lifeTime;
+};
+
+struct PlayerIndicator {
+    Vector3 position;
+    const char* name;
 };
 
 class World {
@@ -32,7 +33,7 @@ public:
     
     void DrawAsteroidModels();
     void DrawUI();
-    void DrawPlayerIndicators(const std::vector<std::pair<Vector3, std::string>>& otherPlayersData, int screenWidth, int screenHeight);
+    void DrawPlayerIndicators(const PlayerIndicator* otherPlayersData, int otherPlayerCount, int screenWidth, int screenHeight);
 
     void UpdateProjectiles(double delta);
     
