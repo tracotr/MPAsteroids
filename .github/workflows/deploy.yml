@@ -115,23 +115,32 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
-            "$DEPLOY_USER@$DEPLOY_HOST" bash -euo pipefail <<REMOTE
-          # Keep the previous set in home, where this user can write.
-          rm -rf ~/mpasteroids-previous
-          cp -a ${{ env.REMOTE_WEB_ROOT }} ~/mpasteroids-previous || true
+            "$DEPLOY_USER@$DEPLOY_HOST" bash -euo pipefail <<'REMOTE'
+          WEB_ROOT=${{ env.REMOTE_WEB_ROOT }}
+          BIN_DIR=${{ env.REMOTE_BIN_DIR }}
+          GAME_FILES="mpasteroids.html mpasteroids.js mpasteroids.wasm mpasteroids.data"
 
-          cp -a ~/mpasteroids-incoming/mpasteroids.html \
-                ~/mpasteroids-incoming/mpasteroids.js \
-                ~/mpasteroids-incoming/mpasteroids.wasm \
-                ~/mpasteroids-incoming/mpasteroids.data \
-                ${{ env.REMOTE_WEB_ROOT }}/
-          chmod -R o+rX ${{ env.REMOTE_WEB_ROOT }}
+          # Keep the previous copies in home, where this user can write.
+          rm -rf ~/mpasteroids-previous
+          mkdir -p ~/mpasteroids-previous
+          for f in $GAME_FILES; do
+              cp "$WEB_ROOT/$f" ~/mpasteroids-previous/ 2>/dev/null || true
+          done
+
+          # Only the game's own files are touched, one at a time. The web root
+          # can hold files belonging to someone else, such as a landing page put
+          # there by hand, and recursing over those fails on the first one this
+          # user does not own.
+          for f in $GAME_FILES; do
+              cp -f ~/mpasteroids-incoming/"$f" "$WEB_ROOT/$f"
+              chmod o+r "$WEB_ROOT/$f"
+          done
 
           # mv rather than cp: the old binary is still running, and replacing the
           # directory entry is allowed where writing over the file is not.
-          mkdir -p ${{ env.REMOTE_BIN_DIR }}
+          mkdir -p "$BIN_DIR"
           chmod +x ~/mpasteroids-incoming/mpasteroids-server
-          mv -f ~/mpasteroids-incoming/mpasteroids-server ${{ env.REMOTE_BIN_DIR }}/mpasteroids-server
+          mv -f ~/mpasteroids-incoming/mpasteroids-server "$BIN_DIR/mpasteroids-server"
 
           rm -rf ~/mpasteroids-incoming
 
