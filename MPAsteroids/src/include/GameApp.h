@@ -21,12 +21,18 @@ public:
     Camera3D GetCamera() const { return camera; }
 
     NetClient& GetNet() { return Net; }
+
+    // Whether the browser has actually given us pointer lock. Do not use
+    // raylib's IsCursorHidden() for this: on web DisableCursor() only requests
+    // the lock and leaves that flag alone, so it never becomes true.
+    bool IsMouseCaptured() const { return mouseCaptured; }
     Player& GetPlayer() { return PlayerShip; }
 
 private:
     void ProcessConnecting();
     void ProcessPlaying();
     void UpdateCamera();
+    void UpdateMouseCapture();
     void DrawConnectingScreen(const char* message);
     void BeginConnectAttempt();
 
@@ -41,6 +47,7 @@ private:
     double connectStartTime;
     double nextRetryTime;
     bool hasPlayedBefore;
+    bool mouseCaptured = false;
 
     const Vector3 CAMERA_OFFSET = { 0.0f, 2.0f, 5.0f };
     const Vector3 CAMERA_UP = { 0.0f, 1.0f, 0.0f };
