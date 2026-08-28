@@ -11,14 +11,11 @@ public:
     bool isFiring = false;
     bool boosterActive = false;
 
-    // update and draw player
     virtual void Update(double delta) override;
     void Draw() override;
 
-    // functions to reset player
     void Reset();
     void Respawn();
 
-    // functions to shoot laser
     Vector3 GetForwardVector();
 };

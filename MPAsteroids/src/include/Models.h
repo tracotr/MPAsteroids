@@ -10,17 +10,14 @@
 
 namespace Models
 {
-    // Models used in game
     extern Model Skybox;
     extern Model ShipModel;
     extern BoundingBox ShipBoxLocal;
     extern Model AsteroidModel;
     extern BoundingBox AsteroidBoxLocal;
     
-    // load models
     void Init();
 
-    // draw models
     void DrawModel(Model model, const Vector3& position, const Matrix& rotation, float scale = 1.0f);
     void DrawSkybox();
     void DrawUI(Camera camera, Vector3 velocity, Vector3 position, int id, int (&scoreboard)[MAX_PLAYERS], char (&names)[MAX_PLAYERS][MAX_PLAYER_NAME_LENGTH]);

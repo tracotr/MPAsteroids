@@ -1,6 +1,6 @@
 #include "include/ServerHost.h"
 
-#include "include/networking/NetCommon.h"
+#include "include/WebSocketServer.h"
 #include "include/networking/NetConstants.h"
 
 #include <atomic>
@@ -19,7 +19,7 @@ struct ServerPlayer
 {
     bool Active = false;
     bool ValidPosition = false;
-    ENetPeer* Peer = nullptr;
+    WebSocketServer::ConnId ConnId = -1;
     char Name[MAX_PLAYER_NAME_LENGTH] = { 0 };
     Vector3 Position = { 0.0f, 0.0f, 0.0f };
     Matrix Rotation = MatrixIdentity();
@@ -37,15 +37,7 @@ public:
         if (running.load())
             return true;
 
-        if (enet_initialize() != 0)
-            return false;
-
-        ENetAddress address = {};
-        address.host = ENET_HOST_ANY;
-        address.port = SERVER_PORT;
-
-        host = enet_host_create(&address, MAX_PLAYERS, 3, 0, 0);
-        if (host == nullptr)
+        if (!wsServer.Start(SERVER_PORT))
             return false;
 
         running.store(true);
@@ -62,13 +54,7 @@ public:
         if (worker.joinable())
             worker.join();
 
-        if (host != nullptr)
-        {
-            enet_host_destroy(host);
-            host = nullptr;
-        }
-
-        enet_deinitialize();
+        wsServer.Stop();
     }
 
     bool IsRunning() const { return running.load(); }
@@ -77,7 +63,7 @@ public:
 private:
     std::atomic<bool> running;
     std::thread worker;
-    ENetHost* host = nullptr;
+    WebSocketServer wsServer;
     ServerPlayer players[MAX_PLAYERS] = {};
     AsteroidInfo asteroids[MAX_ASTEROIDS] = {};
     int asteroidAmount = 0;
@@ -120,8 +106,8 @@ private:
             return false;
 
         double now = GetClockSeconds();
-        if (now - asteroidHitCooldown[id] < 0.1) 
-            return false; 
+        if (now - asteroidHitCooldown[id] < 0.1)
+            return false;
 
         asteroidHitCooldown[id] = now;
 
@@ -168,26 +154,24 @@ private:
         {
             asteroids[id] = CreateAsteroid();
         }
-        
+
         return true;
     }
 
-    void SendPacketToAllBut(ENetPacket* packet, int exceptPlayerId, int channel)
+    void SendPacketToAllBut(const void* data, size_t len, int exceptPlayerId)
     {
         for (int i = 0; i < MAX_PLAYERS; ++i)
         {
             if (!players[i].Active || i == exceptPlayerId)
                 continue;
 
-            ENetPacket* cloned = enet_packet_create(packet->data, packet->dataLength, packet->flags);
-            enet_peer_send(players[i].Peer, channel, cloned);
+            wsServer.Send(players[i].ConnId, data, len);
         }
     }
 
-    void SendPacketToOnly(ENetPacket* packet, int playerId, int channel)
+    void SendPacketToOnly(const void* data, size_t len, int playerId)
     {
-        ENetPacket* cloned = enet_packet_create(packet->data, packet->dataLength, packet->flags);
-        enet_peer_send(players[playerId].Peer, channel, cloned);
+        wsServer.Send(players[playerId].ConnId, data, len);
     }
 
     void UpdateScoreboard()
@@ -202,21 +186,20 @@ private:
                 std::strncpy(buffer.Names[i], players[i].Name, sizeof(buffer.Names[i]) - 1);
         }
 
-        ENetPacket* packet = enet_packet_create(&buffer, sizeof(buffer), ENET_PACKET_FLAG_RELIABLE);
-        SendPacketToAllBut(packet, -1, 0);
+        SendPacketToAllBut(&buffer, sizeof(buffer), -1);
     }
 
-    int GetPlayerId(ENetPeer* peer)
+    int GetPlayerId(WebSocketServer::ConnId connId)
     {
         for (int i = 0; i < MAX_PLAYERS; ++i)
         {
-            if (players[i].Active && players[i].Peer == peer)
+            if (players[i].Active && players[i].ConnId == connId)
                 return i;
         }
         return -1;
     }
 
-    int InitializeNewPlayer(ENetPeer* peer, const char* name = nullptr)
+    int InitializeNewPlayer(WebSocketServer::ConnId connId)
     {
         int playerId = 0;
         for (; playerId < MAX_PLAYERS; ++playerId)
@@ -227,16 +210,14 @@ private:
 
         if (playerId == MAX_PLAYERS)
         {
-            enet_peer_disconnect(peer, 0);
+            wsServer.Disconnect(connId);
             return -1;
         }
 
         players[playerId].Active = true;
         players[playerId].ValidPosition = false;
-        players[playerId].Peer = peer;
+        players[playerId].ConnId = connId;
         std::memset(players[playerId].Name, 0, sizeof(players[playerId].Name));
-        if (name != nullptr && name[0] != '\0')
-            std::strncpy(players[playerId].Name, name, sizeof(players[playerId].Name) - 1);
         players[playerId].Position = { 0.0f, 0.0f, 0.0f };
         players[playerId].Rotation = MatrixIdentity();
         players[playerId].Score = 0;
@@ -244,11 +225,7 @@ private:
         PlayerPacket acceptBuffer = {};
         acceptBuffer.Command = static_cast<int>(NetworkCommands::AcceptPlayer);
         acceptBuffer.Id = playerId;
-        std::memset(acceptBuffer.Name, 0, sizeof(acceptBuffer.Name));
-        if (players[playerId].Name[0] != '\0')
-            std::strncpy(acceptBuffer.Name, players[playerId].Name, sizeof(acceptBuffer.Name) - 1);
-        ENetPacket* acceptPacket = enet_packet_create(&acceptBuffer, sizeof(acceptBuffer), ENET_PACKET_FLAG_RELIABLE);
-        SendPacketToOnly(acceptPacket, playerId, 0);
+        SendPacketToOnly(&acceptBuffer, sizeof(acceptBuffer), playerId);
 
         for (int i = 0; i < MAX_PLAYERS; ++i)
         {
@@ -263,20 +240,8 @@ private:
                 std::strncpy(otherBuffer.Name, players[i].Name, sizeof(otherBuffer.Name) - 1);
             otherBuffer.Position = players[i].Position;
             otherBuffer.Rotation = players[i].Rotation;
-            ENetPacket* otherPacket = enet_packet_create(&otherBuffer, sizeof(otherBuffer), ENET_PACKET_FLAG_RELIABLE);
-            SendPacketToOnly(otherPacket, playerId, 0);
+            SendPacketToOnly(&otherBuffer, sizeof(otherBuffer), playerId);
         }
-
-        PlayerPacket allOtherBuffer = {};
-        allOtherBuffer.Command = static_cast<int>(NetworkCommands::AddPlayer);
-        allOtherBuffer.Id = playerId;
-        std::memset(allOtherBuffer.Name, 0, sizeof(allOtherBuffer.Name));
-        if (players[playerId].Name[0] != '\0')
-            std::strncpy(allOtherBuffer.Name, players[playerId].Name, sizeof(allOtherBuffer.Name) - 1);
-        allOtherBuffer.Position = players[playerId].Position;
-        allOtherBuffer.Rotation = players[playerId].Rotation;
-        ENetPacket* eventPacket = enet_packet_create(&allOtherBuffer, sizeof(allOtherBuffer), ENET_PACKET_FLAG_RELIABLE);
-        SendPacketToAllBut(eventPacket, playerId, 0);
 
         return playerId;
     }
@@ -287,7 +252,7 @@ private:
             return;
 
         players[playerId].Active = false;
-        players[playerId].Peer = nullptr;
+        players[playerId].ConnId = -1;
         players[playerId].Name[0] = '\0';
         players[playerId].Position = { 0.0f, 0.0f, 0.0f };
         players[playerId].Rotation = MatrixIdentity();
@@ -296,8 +261,7 @@ private:
         PlayerPacket removePlayerPacket = {};
         removePlayerPacket.Command = static_cast<int>(NetworkCommands::RemovePlayer);
         removePlayerPacket.Id = playerId;
-        ENetPacket* removePacket = enet_packet_create(&removePlayerPacket, sizeof(removePlayerPacket), ENET_PACKET_FLAG_RELIABLE);
-        SendPacketToAllBut(removePacket, -1, 0);
+        SendPacketToAllBut(&removePlayerPacket, sizeof(removePlayerPacket), -1);
     }
 
     void UpdateAsteroids(double delta)
@@ -347,17 +311,118 @@ private:
         networkTickCounter++;
 
         // Broadcast network data only 5 times a second (30Hz / 6)
-        if (networkTickCounter >= 6) 
+        if (networkTickCounter >= 6)
         {
             AsteroidInfoPacket buffer = {};
             buffer.Command = static_cast<int>(NetworkCommands::UpdateAsteroid);
             memcpy(buffer.AllAsteroids, asteroids, sizeof(asteroids));
             buffer.AsteroidCount = asteroidAmount;
 
-            ENetPacket* packet = enet_packet_create(&buffer, sizeof(buffer), ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT);
-            SendPacketToAllBut(packet, -1, 1);
-            
+            SendPacketToAllBut(&buffer, sizeof(buffer), -1);
+
             networkTickCounter = 0;
+        }
+    }
+
+    void HandlePlayerPacket(WebSocketServer::ConnId connId, const PlayerPacket& received)
+    {
+        int playerId = GetPlayerId(connId);
+        if (playerId == -1)
+            return;
+
+        if (received.Command == static_cast<int>(NetworkCommands::UpdateInput))
+        {
+            if (received.Name[0] != '\0')
+            {
+                std::memset(players[playerId].Name, 0, sizeof(players[playerId].Name));
+                std::strncpy(players[playerId].Name, received.Name, sizeof(players[playerId].Name) - 1);
+            }
+
+            bool wasFirstUpdate = !players[playerId].ValidPosition;
+
+            players[playerId].Position = received.Position;
+            players[playerId].Rotation = received.Rotation;
+            players[playerId].ValidPosition = true;
+
+            // Announce to everyone else only once we know the player's name and
+            // position, so they never appear as an unnamed ghost.
+            if (wasFirstUpdate)
+            {
+                PlayerPacket addPacket = {};
+                addPacket.Command = static_cast<int>(NetworkCommands::AddPlayer);
+                addPacket.Id = playerId;
+                std::strncpy(addPacket.Name, players[playerId].Name, sizeof(addPacket.Name) - 1);
+                addPacket.Position = players[playerId].Position;
+                addPacket.Rotation = players[playerId].Rotation;
+                SendPacketToAllBut(&addPacket, sizeof(addPacket), playerId);
+
+                UpdateScoreboard();
+            }
+
+            PlayerPacket updatePlayerPacket = {};
+            updatePlayerPacket.Command = static_cast<int>(NetworkCommands::UpdatePlayer);
+            updatePlayerPacket.Id = playerId;
+            std::memset(updatePlayerPacket.Name, 0, sizeof(updatePlayerPacket.Name));
+            if (players[playerId].Name[0] != '\0')
+                std::strncpy(updatePlayerPacket.Name, players[playerId].Name, sizeof(updatePlayerPacket.Name) - 1);
+            updatePlayerPacket.Position = players[playerId].Position;
+            updatePlayerPacket.Rotation = players[playerId].Rotation;
+            SendPacketToAllBut(&updatePlayerPacket, sizeof(updatePlayerPacket), playerId);
+        }
+    }
+
+    void OnMessage(WebSocketServer::ConnId connId, const uint8_t* data, size_t len)
+    {
+        if (len == sizeof(PlayerPacket))
+        {
+            PlayerPacket received = {};
+            memcpy(&received, data, sizeof(PlayerPacket));
+            HandlePlayerPacket(connId, received);
+        }
+        else if (len == sizeof(AsteroidDestroyPacket))
+        {
+            AsteroidDestroyPacket received = {};
+            memcpy(&received, data, sizeof(AsteroidDestroyPacket));
+
+            if (received.Command == static_cast<int>(NetworkCommands::DestroyAsteroid))
+            {
+                if (received.AsteroidID >= 0 && received.AsteroidID < asteroidAmount &&
+                    received.PlayerID >= 0 && received.PlayerID < MAX_PLAYERS)
+                {
+                    if (BreakAsteroid(received.AsteroidID))
+                    {
+                        players[received.PlayerID].Score += BASE_SCORE;
+                        UpdateScoreboard();
+                    }
+                }
+            }
+        }
+        else if (len == sizeof(ScoreboardPacket))
+        {
+            ScoreboardPacket received = {};
+            memcpy(&received, data, sizeof(ScoreboardPacket));
+            if (received.Command == static_cast<int>(NetworkCommands::ResetScoreboardId))
+            {
+                for (int i = 0; i < MAX_PLAYERS; ++i)
+                {
+                    if (players[i].Active && i == received.Id)
+                    {
+                        players[i].Score = 0;
+                        break;
+                    }
+                }
+                UpdateScoreboard();
+            }
+        }
+        else if (len == sizeof(ProjectilePacket))
+        {
+            ProjectilePacket received = {};
+            memcpy(&received, data, sizeof(ProjectilePacket));
+
+            if (received.Command == static_cast<int>(NetworkCommands::FireProjectile))
+            {
+                SendPacketToAllBut(&received, sizeof(received), received.PlayerID);
+            }
         }
     }
 
@@ -373,126 +438,26 @@ private:
                 nextTick += SERVER_TICK_INTERVAL;
             }
 
-            ENetEvent event = {};
-            if (enet_host_service(host, &event, 0) > 0)
-            {
-                switch (event.type)
+            wsServer.Poll(0,
+                [this](WebSocketServer::ConnId connId)
                 {
-                    case ENET_EVENT_TYPE_CONNECT:
+                    int playerId = InitializeNewPlayer(connId);
+                    if (playerId != -1)
                     {
-                        // Initialize player immediately on connection (like original server)
-                        // Name will be updated from first UpdateInput packet
-                        int playerId = InitializeNewPlayer(event.peer, nullptr);
-                        if (playerId != -1)
-                        {
-                            SpawnAsteroids(10);
-                            UpdateScoreboard();
-                        }
-                        break;
+                        SpawnAsteroids(10);
+                        UpdateScoreboard();
                     }
-                    case ENET_EVENT_TYPE_RECEIVE:
-                    {
-                        if (event.packet->dataLength == sizeof(PlayerPacket))
-                        {
-                            PlayerPacket received = {};
-                            memcpy(&received, event.packet->data, sizeof(PlayerPacket));
-                            int playerId = GetPlayerId(event.peer);
-                            
-                            if (playerId == -1)
-                            {
-                                enet_peer_disconnect(event.peer, 0);
-                                enet_packet_destroy(event.packet);
-                                break;
-                            }
-
-                            if (received.Command == static_cast<int>(NetworkCommands::UpdateInput))
-                            {
-                                // Update player name from first/subsequent packets
-                                if (received.Name[0] != '\0')
-                                {
-                                    std::memset(players[playerId].Name, 0, sizeof(players[playerId].Name));
-                                    std::strncpy(players[playerId].Name, received.Name, sizeof(players[playerId].Name) - 1);
-                                }
-
-                                players[playerId].Position = received.Position;
-                                players[playerId].Rotation = received.Rotation;
-                                players[playerId].ValidPosition = true;
-
-                                PlayerPacket updatePlayerPacket = {};
-                                updatePlayerPacket.Command = static_cast<int>(NetworkCommands::UpdatePlayer);
-                                updatePlayerPacket.Id = playerId;
-                                std::memset(updatePlayerPacket.Name, 0, sizeof(updatePlayerPacket.Name));
-                                if (players[playerId].Name[0] != '\0')
-                                    std::strncpy(updatePlayerPacket.Name, players[playerId].Name, sizeof(updatePlayerPacket.Name) - 1);
-                                updatePlayerPacket.Position = players[playerId].Position;
-                                updatePlayerPacket.Rotation = players[playerId].Rotation;
-                                ENetPacket* packet = enet_packet_create(&updatePlayerPacket, sizeof(updatePlayerPacket), 0);
-                                SendPacketToAllBut(packet, playerId, 2);
-                            }
-                        }
-                        else if (event.packet->dataLength == sizeof(AsteroidDestroyPacket))
-                        {
-                            AsteroidDestroyPacket received = {};
-                            memcpy(&received, event.packet->data, sizeof(AsteroidDestroyPacket));
-
-                            if (received.Command == static_cast<int>(NetworkCommands::DestroyAsteroid))
-                            {
-                                if (received.AsteroidID >= 0 && received.AsteroidID < asteroidAmount)
-                                {
-                                    if (BreakAsteroid(received.AsteroidID)) 
-                                    {
-                                        players[received.PlayerID].Score += BASE_SCORE;
-                                        UpdateScoreboard();
-                                    }
-                                }
-                            }
-                        }
-                        else if (event.packet->dataLength == sizeof(ScoreboardPacket))
-                        {
-                            ScoreboardPacket received = {};
-                            memcpy(&received, event.packet->data, sizeof(ScoreboardPacket));
-                            if (received.Command == static_cast<int>(NetworkCommands::ResetScoreboardId))
-                            {
-                                for (int i = 0; i < MAX_PLAYERS; ++i)
-                                {
-                                    if (players[i].Active && i == received.Id)
-                                    {
-                                        players[i].Score = 0;
-                                        break;
-                                    }
-                                }
-                                UpdateScoreboard();
-                            }
-                        }
-                        else if (event.packet->dataLength == sizeof(ProjectilePacket))
-                        {
-                            ProjectilePacket received = {};
-                            memcpy(&received, event.packet->data, sizeof(ProjectilePacket));
-
-                            if (received.Command == static_cast<int>(NetworkCommands::FireProjectile))
-                            {
-                                // send the projectile event to all other clients
-                                ENetPacket* packet = enet_packet_create(&received, sizeof(ProjectilePacket), ENET_PACKET_FLAG_RELIABLE);
-                                SendPacketToAllBut(packet, received.PlayerID, 0);
-                            }
-                        }
-
-                        enet_packet_destroy(event.packet);
-                        break;
-                    }
-                    case ENET_EVENT_TYPE_DISCONNECT:
-                    case ENET_EVENT_TYPE_DISCONNECT_TIMEOUT:
-                    {
-                        int playerId = GetPlayerId(event.peer);
-                        if (playerId == -1)
-                            break;
+                },
+                [this](WebSocketServer::ConnId connId, const uint8_t* data, size_t len)
+                {
+                    OnMessage(connId, data, len);
+                },
+                [this](WebSocketServer::ConnId connId)
+                {
+                    int playerId = GetPlayerId(connId);
+                    if (playerId != -1)
                         DisconnectPlayer(playerId);
-                        break;
-                    }
-                    default:
-                        break;
-                }
-            }
+                });
 
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }

@@ -1,30 +1,16 @@
 #include "include/NetClient.h"
-#include "include/networking/NetCommon.h"
 
 #include <cstring>
+#include <cstdio>
 
-ENetAddress Address = { 0 };
-ENetHost* Client = { 0 };
-ENetPeer* Server = { 0 };
-static bool g_enetInitialized = false;
-
-bool EnsureENetReady()
-{
-    if (g_enetInitialized)
-        return true;
-
-    if (enet_initialize() != 0)
-    {
-        printf("Failed to initialize ENet\n");
-        return false;
-    }
-
-    g_enetInitialized = true;
-    return true;
-}
+#include <emscripten/emscripten.h>
+#include <emscripten/websocket.h>
 
 namespace
 {
+    EMSCRIPTEN_WEBSOCKET_T g_socket = 0;
+    NetClient* g_activeClient = nullptr;
+
     void CopySafeName(char* destination, size_t destinationSize, const char* source)
     {
         if (destination == nullptr || destinationSize == 0)
@@ -37,90 +23,177 @@ namespace
         std::strncpy(destination, source, destinationSize - 1);
         destination[destinationSize - 1] = '\0';
     }
+
+    EM_BOOL OnOpen(int, const EmscriptenWebSocketOpenEvent*, void*)
+    {
+        if (g_activeClient) g_activeClient->OnSocketOpen();
+        return EM_TRUE;
+    }
+
+    EM_BOOL OnClose(int, const EmscriptenWebSocketCloseEvent*, void*)
+    {
+        if (g_activeClient) g_activeClient->OnSocketClosed();
+        return EM_TRUE;
+    }
+
+    EM_BOOL OnError(int, const EmscriptenWebSocketErrorEvent*, void*)
+    {
+        if (g_activeClient) g_activeClient->OnSocketClosed();
+        return EM_TRUE;
+    }
+
+    EM_BOOL OnMessage(int, const EmscriptenWebSocketMessageEvent* event, void*)
+    {
+        if (g_activeClient && event->isText == EM_FALSE)
+            g_activeClient->OnSocketMessage(event->data, event->numBytes);
+        return EM_TRUE;
+    }
 }
 
 bool NetClient::NetConnect(const char* serverAddress, const char* playerName)
 {
-    // Tear down any previous attempt first, so retrying with a different address doesn't leak the old client host or leave stale peer state behind.
-    if (Client != NULL)
-    {
-        enet_host_destroy(Client);
-        Client = NULL;
-        Server = NULL;
-    }
+    NetDisconnect();
 
     LocalPlayerId = -1;
+    RemoteProjectileCount = 0;
+    AsteroidAmount = 0;
+    std::memset(Players, 0, sizeof(Players));
+    std::memset(PlayerNames, 0, sizeof(PlayerNames));
+    std::memset(Scoreboard, 0, sizeof(Scoreboard));
+
     CopySafeName(LocalPlayerName, sizeof(LocalPlayerName), playerName);
     if (LocalPlayerName[0] == '\0')
         CopySafeName(LocalPlayerName, sizeof(LocalPlayerName), "Player");
 
-    if (!EnsureENetReady())
+    if (!emscripten_websocket_is_supported())
     {
-        return false;
-    }
-    
-    // create the server host
-    // channel 0: reliable packets
-    // channel 1: asteroid updates
-    // channel 2: player updates
-    Client = enet_host_create(NULL, 1, 3, 0 ,0);
-
-    if(Client == NULL) 
-    {
+        printf("[CLIENT] WebSockets are not supported in this browser\n");
         return false;
     }
 
-    enet_address_set_host(&Address, serverAddress);
-    Address.port = SERVER_PORT;
+    // Browsers block ws:// from an https:// page, so follow the page's scheme.
+    const bool pageIsSecure = EM_ASM_INT({ return location.protocol === 'https:' ? 1 : 0; }) != 0;
+    const char* scheme = pageIsSecure ? "wss" : "ws";
+    const int port = SERVER_PUBLIC_PORT;
+    const bool portIsDefault = (pageIsSecure && port == 443) || (!pageIsSecure && port == 80);
 
-    Server = enet_host_connect(Client, &Address, 3, 0);
+    char url[256];
+    if (portIsDefault)
+        std::snprintf(url, sizeof(url), "%s://%s%s", scheme, serverAddress, SERVER_PATH);
+    else
+        std::snprintf(url, sizeof(url), "%s://%s:%d%s", scheme, serverAddress, port, SERVER_PATH);
 
-    if(Server == NULL) 
+    // The compile-time address is only a default. The page can retarget this build
+    // without a rebuild, which matters when the server sits behind a tunnel whose
+    // hostname changes. Accepts a bare host, host:port, or a full URL.
+    char serverOverride[256] = { 0 };
+
+    // EM_ASM splits its body on top-level commas, so declare each var separately.
+    EM_ASM({
+        var out = $0;
+        var max = $1;
+        var value = "";
+        try {
+            var fromQuery = new URLSearchParams(location.search).get("server");
+            if (fromQuery) { value = fromQuery; }
+            else if (typeof window.MPASTEROIDS_SERVER === "string") { value = window.MPASTEROIDS_SERVER; }
+        } catch (e) { value = ""; }
+        stringToUTF8(String(value), out, max);
+    }, serverOverride, (int)sizeof(serverOverride));
+
+    if (serverOverride[0] != '\0')
     {
-        enet_host_destroy(Client);
-        Client = NULL;
+        if (std::strstr(serverOverride, "://") != nullptr)
+            std::snprintf(url, sizeof(url), "%s", serverOverride);
+        else if (std::strchr(serverOverride, '/') != nullptr)
+            std::snprintf(url, sizeof(url), "%s://%s", scheme, serverOverride);
+        else
+            std::snprintf(url, sizeof(url), "%s://%s%s", scheme, serverOverride, SERVER_PATH);
+
+        printf("[CLIENT] Server override: %s\n", url);
+    }
+
+    EmscriptenWebSocketCreateAttributes attributes = {};
+    attributes.url = url;
+    attributes.protocols = nullptr;
+    attributes.createOnMainThread = EM_TRUE;
+
+    g_socket = emscripten_websocket_new(&attributes);
+    if (g_socket <= 0)
+    {
+        printf("[CLIENT] Failed to create WebSocket for %s\n", url);
+        g_socket = 0;
         return false;
     }
 
-    PlayerPacket announce = { 0 };
+    g_activeClient = this;
+    Status = NetStatus::Connecting;
+
+    emscripten_websocket_set_onopen_callback(g_socket, nullptr, OnOpen);
+    emscripten_websocket_set_onclose_callback(g_socket, nullptr, OnClose);
+    emscripten_websocket_set_onerror_callback(g_socket, nullptr, OnError);
+    emscripten_websocket_set_onmessage_callback(g_socket, nullptr, OnMessage);
+
+    return true;
+}
+
+void NetClient::NetDisconnect()
+{
+    if (g_socket > 0)
+    {
+        emscripten_websocket_close(g_socket, 1000, "client shutdown");
+        emscripten_websocket_delete(g_socket);
+        g_socket = 0;
+    }
+
+    g_activeClient = nullptr;
+    Status = NetStatus::Disconnected;
+    LocalPlayerId = -1;
+}
+
+void NetClient::SendPacket(const void* data, size_t length)
+{
+    if (g_socket <= 0 || Status != NetStatus::Connected)
+        return;
+
+    emscripten_websocket_send_binary(g_socket, const_cast<void*>(data), (uint32_t)length);
+}
+
+void NetClient::OnSocketOpen()
+{
+    Status = NetStatus::Connected;
+    LastInputSend = -UPDATE_INTERVAL;
+
+    PlayerPacket announce = {};
     announce.Command = static_cast<int>(NetworkCommands::UpdateInput);
     CopySafeName(announce.Name, sizeof(announce.Name), LocalPlayerName);
     announce.Position = (Vector3){ 0.0f, 0.0f, 0.0f };
     announce.Rotation = MatrixIdentity();
 
-    ENetPacket* packet = enet_packet_create(&announce, sizeof(announce), 0);
-    enet_peer_send(Server, 2, packet);
-
-    return true;
+    SendPacket(&announce, sizeof(announce));
 }
 
-void NetClient::BeginHostedSession(const char* playerName)
+void NetClient::OnSocketClosed()
 {
-    CopySafeName(LocalPlayerName, sizeof(LocalPlayerName), playerName);
-    if (LocalPlayerName[0] == '\0')
-        CopySafeName(LocalPlayerName, sizeof(LocalPlayerName), "Player");
-
-    LocalPlayerId = 0;
-    Players[0].Active = true;
-    Players[0].Position = (Vector3){ 0.0f, 0.0f, 0.0f };
-    Players[0].Rotation = MatrixIdentity();
-    CopySafeName(Players[0].Name, sizeof(Players[0].Name), LocalPlayerName);
-    CopySafeName(PlayerNames[0], sizeof(PlayerNames[0]), LocalPlayerName);
-    LastInputSend = -UPDATE_INTERVAL;
+    Status = NetStatus::Disconnected;
+    LocalPlayerId = -1;
+    AsteroidAmount = 0;
+    RemoteProjectileCount = 0;
+    std::memset(Players, 0, sizeof(Players));
 }
 
-// A new remote player was added to our local simulation
+void NetClient::OnSocketMessage(const uint8_t* data, size_t length)
+{
+    DispatchPacket(data, length);
+}
+
 void NetClient::HandleAddPlayer(PlayerPacket packet)
 {
-    printf("Added new player\n");
-	// find out who the server is talking about
 	int remotePlayer = packet.Id;
 
-    // skip if out of bounds, or local player
-	if(remotePlayer >= MAX_PLAYERS || remotePlayer == LocalPlayerId)
+	if(remotePlayer < 0 || remotePlayer >= MAX_PLAYERS || remotePlayer == LocalPlayerId)
 		return;
 
-	// set them as active and update the location
 	Players[remotePlayer].Active = true;
     CopySafeName(Players[remotePlayer].Name, sizeof(Players[remotePlayer].Name), packet.Name);
     CopySafeName(PlayerNames[remotePlayer], sizeof(PlayerNames[remotePlayer]), packet.Name);
@@ -131,33 +204,25 @@ void NetClient::HandleAddPlayer(PlayerPacket packet)
 	Players[remotePlayer].LastUpdateTime = LastNow;
 }
 
-// A remote player has left the game and needs to be removed from the local simulation
 void NetClient::HandleRemovePlayer(PlayerPacket packet)
 {
-	// find out who the server is talking about
 	int remotePlayer = packet.Id;
 
-    // skip if out of bounds, or local player
-	if(remotePlayer >= MAX_PLAYERS || remotePlayer == LocalPlayerId)
+	if(remotePlayer < 0 || remotePlayer >= MAX_PLAYERS || remotePlayer == LocalPlayerId)
 		return;
 
-	// remove the player from the simulation. No other data is needed except the player id
 	Players[remotePlayer].Active = false;
     Players[remotePlayer].Name[0] = '\0';
     PlayerNames[remotePlayer][0] = '\0';
 }
 
-// The server has a new position for a player in our local simulation
 void NetClient::HandleUpdatePlayer(PlayerPacket packet)
 {
-	// find out who the server is talking about
 	int remotePlayer = packet.Id;
 
-    // skip if out of bounds, local player, or not active
-	if(remotePlayer >= MAX_PLAYERS || remotePlayer == LocalPlayerId || !Players[remotePlayer].Active)
+	if(remotePlayer < 0 || remotePlayer >= MAX_PLAYERS || remotePlayer == LocalPlayerId || !Players[remotePlayer].Active)
 		return;
 
-	// update the last known position and movement
     CopySafeName(Players[remotePlayer].Name, sizeof(Players[remotePlayer].Name), packet.Name);
     CopySafeName(PlayerNames[remotePlayer], sizeof(PlayerNames[remotePlayer]), packet.Name);
 
@@ -168,42 +233,34 @@ void NetClient::HandleUpdatePlayer(PlayerPacket packet)
 
 void NetClient::UpdateLocalPlayer(Vector3 pos, Matrix rot)
 {
-    // if we are not accepted, we can't update
+    // The server hasn't assigned us a slot yet.
 	if(LocalPlayerId < 0)
         return;
 
-    // Update local player
     Players[LocalPlayerId].Position = pos;
     Players[LocalPlayerId].Rotation = rot;
 }
 
 bool NetClient::GetPlayerSpatial(int id, Vector3* pos, Matrix* rot)
 {
-    // make sure the player is valid and active, or disregard our player id
+    // Callers draw the result, and the local ship is drawn separately.
     if (id < 0 || id >= MAX_PLAYERS || !Players[id].Active || id == LocalPlayerId)
     {
         return false;
     }
 
-    // copy the location of our networked friend
     *pos = Players[id].Position;
     *rot = Players[id].Rotation;
-
-    // return true because they exist
     return true;
 }
 
 void NetClient::HandlePlayerCollision()
 {
-    ScoreboardPacket scoreboardBuffer;
+    ScoreboardPacket scoreboardBuffer = {};
     scoreboardBuffer.Command = NetworkCommands::ResetScoreboardId;
     scoreboardBuffer.Id = LocalPlayerId;
 
-    // create packet
-    ENetPacket* packet = enet_packet_create(&scoreboardBuffer, sizeof(scoreboardBuffer), ENET_PACKET_FLAG_RELIABLE);
-    
-    // send the data to the user
-    enet_peer_send(Server, 0, packet);
+    SendPacket(&scoreboardBuffer, sizeof(scoreboardBuffer));
 }
 
 void NetClient::HandleUpdateAsteroid(AsteroidInfoPacket packet)
@@ -216,22 +273,16 @@ void NetClient::HandleUpdateAsteroid(AsteroidInfoPacket packet)
 
 void NetClient::HandleDestroyAsteroid(int playerIdx, int asteroidIdx)
 {
-    // create buffer
-    AsteroidDestroyPacket buffer = { 0 };
+    AsteroidDestroyPacket buffer = {};
     buffer.Command = NetworkCommands::DestroyAsteroid;
     buffer.PlayerID = playerIdx;
     buffer.AsteroidID = asteroidIdx;
 
-    // create packet
-    ENetPacket* packet = enet_packet_create(&buffer, sizeof(buffer), ENET_PACKET_FLAG_RELIABLE);
-    
-    // send the data to the user
-    enet_peer_send(Server, 0, packet);
+    SendPacket(&buffer, sizeof(buffer));
 }
 
 bool NetClient::GetAsteroidSpatial(int id, Vector3* pos, Matrix* rot, float* scale)
-{   
-    // skip if out of bounds
+{
     if(id < 0 || id >= AsteroidAmount)
     {
         return false;
@@ -246,21 +297,107 @@ bool NetClient::GetAsteroidSpatial(int id, Vector3* pos, Matrix* rot, float* sca
 
 void NetClient::HandleUpdateScoreboard(ScoreboardPacket packet)
 {
-    // copy argument into our scoreboard
     memcpy(Scoreboard, packet.Scoreboard, sizeof(packet.Scoreboard));
     for (int i = 0; i < MAX_PLAYERS; ++i)
         CopySafeName(PlayerNames[i], sizeof(PlayerNames[i]), packet.Names[i]);
 }
 
+// Packet type is identified by payload size; every packet struct has a distinct one.
+void NetClient::DispatchPacket(const uint8_t* data, size_t length)
+{
+    if (length < 1)
+        return;
+
+    if (length == sizeof(PlayerPacket))
+    {
+        PlayerPacket recieved;
+        memcpy(&recieved, data, sizeof(PlayerPacket));
+
+        // Until the server assigns us an id, AcceptPlayer is the only packet we act on.
+        if (LocalPlayerId != -1)
+        {
+            switch (recieved.Command)
+            {
+                case NetworkCommands::AddPlayer:
+                    HandleAddPlayer(recieved);
+                    break;
+
+                case NetworkCommands::RemovePlayer:
+                    HandleRemovePlayer(recieved);
+                    break;
+
+                case NetworkCommands::UpdatePlayer:
+                    HandleUpdatePlayer(recieved);
+                    break;
+            }
+        }
+        else
+        {
+            if (recieved.Command != NetworkCommands::AcceptPlayer)
+                return;
+
+            if (recieved.Id < 0 || recieved.Id >= MAX_PLAYERS)
+                return;
+
+            LocalPlayerId = recieved.Id;
+
+            if (recieved.Name[0] != '\0')
+                CopySafeName(LocalPlayerName, sizeof(LocalPlayerName), recieved.Name);
+            else if (LocalPlayerName[0] == '\0')
+                CopySafeName(LocalPlayerName, sizeof(LocalPlayerName), "Player");
+            CopySafeName(PlayerNames[LocalPlayerId], sizeof(PlayerNames[LocalPlayerId]), LocalPlayerName);
+
+            LastInputSend = -UPDATE_INTERVAL;
+
+            Players[LocalPlayerId].Active = true;
+            CopySafeName(Players[LocalPlayerId].Name, sizeof(Players[LocalPlayerId].Name), LocalPlayerName);
+            Players[LocalPlayerId].Position = (Vector3){ 0.0f, 0.0f, 0.0f };
+        }
+    }
+    else if (length == sizeof(AsteroidInfoPacket))
+    {
+        AsteroidInfoPacket recieved;
+        memcpy(&recieved, data, sizeof(AsteroidInfoPacket));
+
+        if (recieved.Command == NetworkCommands::UpdateAsteroid)
+            HandleUpdateAsteroid(recieved);
+    }
+    else if (length == sizeof(ScoreboardPacket))
+    {
+        ScoreboardPacket recieved;
+        memcpy(&recieved, data, sizeof(ScoreboardPacket));
+
+        if (recieved.Command == NetworkCommands::UpdateScoreboard)
+            HandleUpdateScoreboard(recieved);
+    }
+    else if (length == sizeof(ProjectilePacket))
+    {
+        ProjectilePacket recieved;
+        memcpy(&recieved, data, sizeof(ProjectilePacket));
+
+        if (recieved.Command == NetworkCommands::FireProjectile)
+        {
+            if (RemoteProjectileCount < MAX_PROJECTILES)
+            {
+                RemoteProjectilesQueue[RemoteProjectileCount].Position = recieved.Position;
+                RemoteProjectilesQueue[RemoteProjectileCount].Velocity = recieved.Velocity;
+                RemoteProjectileCount++;
+            }
+        }
+    }
+}
 
 void NetClient::NetUpdate(double now, float delta)
 {
     LastNow = now;
 
-    // Skip if no server
-    if (Server == NULL)
+    if (Status != NetStatus::Connected)
         return;
 
+    // The server only broadcasts state a few times a second, so both asteroids and
+    // remote players are advanced locally between updates to keep motion smooth:
+    // asteroids extrapolate along their last known velocity, players ease toward
+    // the last position received.
     for (int i = 0; i < AsteroidAmount; i++)
     {
         Asteroids[i].Position.x += Asteroids[i].Velocity.x * delta;
@@ -272,182 +409,34 @@ void NetClient::NetUpdate(double now, float delta)
     {
         if (i != LocalPlayerId && Players[i].Active)
         {
-            float lerpSpeed = 10.0f; // Higher = snappier, Lower = floatier
+            float lerpSpeed = 10.0f; // Higher = snappier, lower = floatier.
             Players[i].Position.x += (Players[i].TargetPosition.x - Players[i].Position.x) * lerpSpeed * delta;
             Players[i].Position.y += (Players[i].TargetPosition.y - Players[i].Position.y) * lerpSpeed * delta;
             Players[i].Position.z += (Players[i].TargetPosition.z - Players[i].Position.z) * lerpSpeed * delta;
         }
     }
 
-    // if we're in a server send packet to server
     if(LocalPlayerId >= 0 && now - LastInputSend > UPDATE_INTERVAL)
     {
-        // construct a buffer and send it through a packet
-        PlayerPacket buffer = { 0 };
+        PlayerPacket buffer = {};
         buffer.Command = NetworkCommands::UpdateInput;
         CopySafeName(buffer.Name, sizeof(buffer.Name), LocalPlayerName);
         buffer.Position = Players[LocalPlayerId].Position;
         buffer.Rotation = Players[LocalPlayerId].Rotation;
 
-        // create packet
-        ENetPacket* packet = enet_packet_create(&buffer, sizeof(buffer), ENET_PACKET_FLAG_RELIABLE);
-        // send the data to the server
-        enet_peer_send(Server, 2, packet);
+        SendPacket(&buffer, sizeof(buffer));
 
         LastInputSend = now;
-    }
-
-    ENetEvent event = {};
-    if(enet_host_service(Client, &event, 0) > 0)
-    {
-        switch(event.type)
-        {
-            case ENET_EVENT_TYPE_CONNECT:
-                break;
-
-            case ENET_EVENT_TYPE_RECEIVE:
-            {
-				if(event.packet->dataLength < 1)
-				{
-					enet_packet_destroy(event.packet);
-					break;
-				}
-
-                if(event.packet->dataLength == sizeof(PlayerPacket))
-                {   
-                    // Recieve our packet sent from our players
-                    PlayerPacket recieved;
-                    memcpy(&recieved, event.packet->data, sizeof(PlayerPacket));
-
-                    // If we have an id in the server, do what the server wants us to do
-                    if (LocalPlayerId != -1)
-                    {
-                        switch (recieved.Command)
-                        {
-                            case NetworkCommands::AddPlayer:
-                                HandleAddPlayer(recieved);
-                                break;
-
-                            case NetworkCommands::RemovePlayer:
-                                HandleRemovePlayer(recieved);
-                                break;
-
-                            case NetworkCommands::UpdatePlayer:
-                                HandleUpdatePlayer(recieved);
-                                break;
-                        }
-                    }
-                    // We do not have an ID in the server, so we need to read the accept command
-                    else 
-                    {
-                        if (recieved.Command != NetworkCommands::AcceptPlayer)
-                            return;
-
-                        // Read id from command, check if in bounds, and prepare it to be in the game.
-                        LocalPlayerId = recieved.Id;
-
-                        if (LocalPlayerId < 0 || LocalPlayerId > MAX_PLAYERS)
-                        {
-                            LocalPlayerId = -1;
-                            break;
-                        }
-
-                        if (recieved.Name[0] != '\0')
-                            CopySafeName(LocalPlayerName, sizeof(LocalPlayerName), recieved.Name);
-                        else if (LocalPlayerName[0] == '\0')
-                            CopySafeName(LocalPlayerName, sizeof(LocalPlayerName), "Player");
-                        CopySafeName(PlayerNames[LocalPlayerId], sizeof(PlayerNames[LocalPlayerId]), LocalPlayerName);
-
-                        LastInputSend = -UPDATE_INTERVAL;
-                        
-                        Players[LocalPlayerId].Active = true;
-                        CopySafeName(Players[LocalPlayerId].Name, sizeof(Players[LocalPlayerId].Name), LocalPlayerName);
-                        Players[LocalPlayerId].Position = (Vector3){ 0.0f, 0.0f, 0.0f };
-                    }
-                }
-                else if(event.packet->dataLength == sizeof(AsteroidInfoPacket))
-                {
-                    // Recieve our packet sent from our players
-                    AsteroidInfoPacket recieved;
-                    memcpy(&recieved, event.packet->data, sizeof(AsteroidInfoPacket));
-
-                    if(recieved.Command == NetworkCommands::UpdateAsteroid)
-                    {
-                        HandleUpdateAsteroid(recieved);
-                    }
-                }
-                else if(event.packet->dataLength == sizeof(ScoreboardPacket))
-                {
-                    ScoreboardPacket recieved;
-                    memcpy(&recieved, event.packet->data, sizeof(ScoreboardPacket));
-                    if(recieved.Command == NetworkCommands::UpdateScoreboard)
-                    {
-                        HandleUpdateScoreboard(recieved);
-                    }
-                }
-                else if (event.packet->dataLength == sizeof(ProjectilePacket))
-                {
-                    ProjectilePacket recieved;
-                    memcpy(&recieved, event.packet->data, sizeof(ProjectilePacket));
-
-                    if (recieved.Command == NetworkCommands::FireProjectile)
-                    {
-                        if (RemoteProjectileCount < MAX_PROJECTILES)
-                        {
-                            RemoteProjectilesQueue[RemoteProjectileCount].Position = recieved.Position;
-                            RemoteProjectilesQueue[RemoteProjectileCount].Velocity = recieved.Velocity;
-                            RemoteProjectileCount++;
-                        }
-                    }
-                }
-
-                enet_packet_destroy(event.packet);
-                break;
-            }
-            case ENET_EVENT_TYPE_DISCONNECT_TIMEOUT:
-                printf("[CLIENT] DISCONNECT_TIMEOUT event: Connection timeout\n");
-                // close our client
-				if (Client != NULL)
-                    enet_host_destroy(Client);
-
-                Client = NULL;
-                Server = NULL;
-
-                // clean up enet
-                enet_deinitialize();
-
-                Server = NULL;
-                LocalPlayerId = -1;
-                break;
-            case ENET_EVENT_TYPE_DISCONNECT:
-                printf("[CLIENT] DISCONNECT event: Server disconnected\n");
-                // close our client
-				if (Client != NULL)
-                    enet_host_destroy(Client);
-
-                Client = NULL;
-                Server = NULL;
-
-                // clean up enet
-                enet_deinitialize();
-
-                Server = NULL;
-                LocalPlayerId = -1;
-                break;
-            case ENET_EVENT_TYPE_NONE:
-            break;
-        }
     }
 }
 
 void NetClient::SendProjectile(Vector3 position, Vector3 velocity)
 {
-    ProjectilePacket buffer = { 0 };
+    ProjectilePacket buffer = {};
     buffer.Command = NetworkCommands::FireProjectile;
     buffer.PlayerID = LocalPlayerId;
     buffer.Position = position;
     buffer.Velocity = velocity;
 
-    ENetPacket* packet = enet_packet_create(&buffer, sizeof(buffer), ENET_PACKET_FLAG_RELIABLE);
-    enet_peer_send(Server, 0, packet);
+    SendPacket(&buffer, sizeof(buffer));
 }

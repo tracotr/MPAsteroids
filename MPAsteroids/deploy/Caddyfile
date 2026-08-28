@@ -1,0 +1,17 @@
+# Caddy config for MPAsteroids.
+# Serves the built web client as static files and reverse-proxies the
+# WebSocket path to the local dedicated server. Caddy fetches and renews
+# the HTTPS certificate automatically via Let's Encrypt as long as the
+# domain below resolves to this VM and ports 80/443 are reachable.
+
+asteroids.jaxon-king.com {
+	handle /ws* {
+		reverse_proxy 127.0.0.1:25665
+	}
+	handle {
+		root * /var/www/mpasteroids
+		file_server {
+			index mpasteroids.html
+		}
+	}
+}

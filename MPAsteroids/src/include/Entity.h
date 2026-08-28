@@ -8,18 +8,15 @@ class Entity
 public:
     bool Alive = false;
 
-    // movement speeds
     float BaseSpeed = 0.5f;
     float MaxSpeed = 60.0f;
     float RotationSpeed = 0.04f;
     float slowRotationSpeed = 0.01f;
 
-    // Spatial vectors
     Vector3 Position = { 0.0f, 0.0f, 0.0f };
     Matrix Rotation = MatrixIdentity();
     Vector3 Velocity = { 0.0f, 0.0f, 0.0f };
 
-    // Directional vectors
     const Vector3 Forward = (Vector3){ 0.0f, 0.0f, -1.0f };
     const Vector3 Backward = (Vector3){ 0.0f, 0.0f, 1.0f };
 

@@ -18,12 +18,9 @@ void Player::Update(double delta)
         Sounds::StopBooster();
     }
 
-    // update laser
     laserCooldown += delta;
     laserCooldown = Clamp(laserCooldown, 0.0, LASER_COOLDOWN_DURATION);
 
-    // Shooting controls
-    // ----------------------
     isFiring = false;
     if (IsKeyDown(KEY_SPACE))
     {
@@ -35,8 +32,6 @@ void Player::Update(double delta)
         }
     }
     
-    // Rotation controls
-    // ----------------------
     float currentRotationSpeed = RotationSpeed;
 
     // Our ship rotates slower when holding down the shift key
@@ -45,21 +40,15 @@ void Player::Update(double delta)
         currentRotationSpeed = slowRotationSpeed;
     }
 
-    // Pitch
     if (IsKeyDown(KEY_W)) Rotation = MatrixMultiply(MatrixRotateX(currentRotationSpeed), Rotation);
     if (IsKeyDown(KEY_S)) Rotation = MatrixMultiply(MatrixRotateX(-currentRotationSpeed), Rotation);
 
-    // Yaw
     if (IsKeyDown(KEY_A)) Rotation = MatrixMultiply(MatrixRotateY(currentRotationSpeed), Rotation);
     if (IsKeyDown(KEY_D)) Rotation = MatrixMultiply(MatrixRotateY(-currentRotationSpeed), Rotation);
 
-    // Roll
     if (IsKeyDown(KEY_Q)) Rotation = MatrixMultiply(MatrixRotateZ(currentRotationSpeed), Rotation);
     if (IsKeyDown(KEY_E)) Rotation = MatrixMultiply(MatrixRotateZ(-currentRotationSpeed), Rotation);
 
-
-    // Movement Controls
-    // ----------------------
     if (IsKeyDown(KEY_R) && Vector3LengthSqr(Velocity) <= MaxSpeed)
     {
         Vector3 forward = Vector3Transform(Forward, Rotation);
@@ -72,25 +61,20 @@ void Player::Update(double delta)
         Velocity = Vector3Add(Velocity, forward);
     }
 
-    // Apply friction to slow ship
-	Vector3 friction = Vector3Scale(Vector3Normalize(Velocity), -2.5f * GetFrameTime());
+	Vector3 friction = Vector3Scale(Vector3Normalize(Velocity), -2.5f * (float)delta);
 
-    // Apply friction to our velocity, and eventually stop ship
 	if (Vector3LengthSqr(friction) < Vector3LengthSqr(Velocity))
         Velocity = Vector3Add(Velocity, friction);
 	else	
         Velocity = { 0.0f, 0.0f, 0.0f };
 
-
-    // Update position based off velocity
-    Position = Vector3Add(Position, Vector3Scale(Velocity, GetFrameTime()));
+    Position = Vector3Add(Position, Vector3Scale(Velocity, (float)delta));
 
     if (IsKeyDown(KEY_Y)) Reset();
 }
 
 void Player::Draw()
 {
-    // draw model
     Models::DrawModel(Models::ShipModel, this->Position, this->Rotation);
 }
 

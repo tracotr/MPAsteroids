@@ -1,1 +1,11 @@
 /.vscode
+
+# Web build output
+MPAsteroids/mpasteroids.html
+MPAsteroids/mpasteroids.js
+MPAsteroids/mpasteroids.wasm
+MPAsteroids/mpasteroids.data
+
+# Server build output
+MPAsteroids/mpasteroids-server
+MPAsteroids/mpasteroids-server.exe
