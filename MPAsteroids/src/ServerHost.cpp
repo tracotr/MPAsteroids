@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <random>
 #include <string>
@@ -12,8 +13,20 @@
 
 #define BASE_SCORE 5
 
+// A player is a harder target than a rock, so worth more.
+#define KILL_SCORE 25
+
 const double SERVER_TICK_RATE = 30.0;
 const double SERVER_TICK_INTERVAL = 1.0 / SERVER_TICK_RATE;
+
+// Asteroid positions are sent every Nth tick. Clients keep the rocks moving on
+// their own in between, so a bigger number saves traffic but lets their guess
+// drift further before the next update corrects it.
+const int ASTEROID_BROADCAST_EVERY = 3; // 30Hz / 3 = 10Hz
+
+// Cap on asteroids created in a single tick, so filling an empty field is spread
+// over a few frames rather than arriving as one spike.
+const int ASTEROID_SPAWNS_PER_TICK = 4;
 
 struct ServerPlayer
 {
@@ -24,6 +37,32 @@ struct ServerPlayer
     Vector3 Position = { 0.0f, 0.0f, 0.0f };
     Matrix Rotation = MatrixIdentity();
     int Score = 0;
+
+    // When they last reported in, and when they were last killed. Together these
+    // stop a ship whose client has stopped running from being farmed for points.
+    double LastInputTime = 0.0;
+    double KilledAt = -1.0;
+};
+
+// One switched-on cube of the play area.
+struct RegionCell
+{
+    int X = 0, Y = 0, Z = 0;
+    double LastOccupied = 0.0;
+};
+
+// The server's own record of an asteroid. Kept separate from the version sent
+// to clients because it holds things they never need: whether the slot is in
+// use, and when it was last hit.
+struct ServerAsteroid
+{
+    bool Active = false;
+    uint32_t Id = 0;
+    uint8_t Seed = 0;
+    Vector3 Position = { 0.0f, 0.0f, 0.0f };
+    Vector3 Velocity = { 0.0f, 0.0f, 0.0f };
+    float Scale = 1.0f;
+    double LastHitTime = -1.0;
 };
 
 class ServerHost::Impl
@@ -65,10 +104,16 @@ private:
     std::thread worker;
     WebSocketServer wsServer;
     ServerPlayer players[MAX_PLAYERS] = {};
-    AsteroidInfo asteroids[MAX_ASTEROIDS] = {};
-    int asteroidAmount = 0;
 
-    double asteroidHitCooldown[MAX_ASTEROIDS] = { 0.0 };
+    ServerAsteroid asteroids[MAX_ASTEROIDS] = {};
+    int liveAsteroids = 0;
+
+    RegionCell regionCells[MAX_REGION_CELLS] = {};
+    int regionCellCount = 0;
+
+    // Never reused, so a client can tell an asteroid that moved apart from a
+    // different one that took over its old slot.
+    uint32_t nextAsteroidId = 1;
 
     static double GetClockSeconds()
     {
@@ -83,76 +128,336 @@ private:
         return dist(gen);
     }
 
-    AsteroidInfo CreateAsteroid()
+    // Throws away points that land outside the sphere and tries again, which
+    // spreads the directions evenly. Just picking each axis at random and
+    // scaling to length one would bunch them up toward the corners.
+    Vector3 RandomDirection()
     {
-        AsteroidInfo asteroid = {};
-        asteroid.Position = (Vector3){ RandBetween(-25.0f, 25.0f), RandBetween(-25.0f, 25.0f), RandBetween(-25.0f, 25.0f) };
-        asteroid.Velocity = (Vector3){ RandBetween(-2.0f, 2.0f), RandBetween(-2.0f, 2.0f), RandBetween(-2.0f, 2.0f) };
-        asteroid.Rotation = MatrixIdentity();
-        asteroid.Scale = 1.0f;
-        asteroid.Active = true;
-        return asteroid;
+        for (int attempt = 0; attempt < 12; ++attempt)
+        {
+            Vector3 candidate = { RandBetween(-1.0f, 1.0f), RandBetween(-1.0f, 1.0f), RandBetween(-1.0f, 1.0f) };
+            float lengthSq = Vector3LengthSqr(candidate);
+            if (lengthSq > 0.0001f && lengthSq <= 1.0f)
+                return Vector3Scale(candidate, 1.0f / sqrtf(lengthSq));
+        }
+        return (Vector3){ 0.0f, 0.0f, 1.0f };
     }
 
-    void SpawnAsteroids(int amount)
+    // Counts players actually in the world, not just ones with a socket open.
+    // Asteroids are placed and wrapped around players whose position we know, so
+    // counting a player who has connected but not sent one yet would have us
+    // spawn rocks and then delete them again on the same tick.
+    int ActivePlayerCount() const
     {
-        for (int i = 0; i < amount && asteroidAmount < MAX_ASTEROIDS; ++i)
-            asteroids[asteroidAmount++] = CreateAsteroid();
+        int count = 0;
+        for (int i = 0; i < MAX_PLAYERS; ++i)
+        {
+            if (players[i].Active && players[i].ValidPosition)
+                count++;
+        }
+        return count;
     }
 
-    bool BreakAsteroid(int id)
+    int AllocateAsteroid()
     {
-        if (id < 0 || id >= asteroidAmount)
+        for (int i = 0; i < MAX_ASTEROIDS; ++i)
+        {
+            if (asteroids[i].Active)
+                continue;
+
+            asteroids[i] = ServerAsteroid{};
+            asteroids[i].Active = true;
+            asteroids[i].Id = nextAsteroidId++;
+            asteroids[i].Seed = (uint8_t)(asteroids[i].Id * 37u);
+            liveAsteroids++;
+            return i;
+        }
+        return -1;
+    }
+
+    void ReleaseAsteroid(int slot)
+    {
+        if (slot < 0 || slot >= MAX_ASTEROIDS || !asteroids[slot].Active)
+            return;
+
+        asteroids[slot] = ServerAsteroid{};
+        liveAsteroids--;
+    }
+
+    int FindAsteroidById(uint32_t id) const
+    {
+        if (id == 0)
+            return -1;
+
+        for (int i = 0; i < MAX_ASTEROIDS; ++i)
+        {
+            if (asteroids[i].Active && asteroids[i].Id == id)
+                return i;
+        }
+        return -1;
+    }
+
+    // --- The play area -------------------------------------------------------
+    //
+    // Rather than one bubble that follows whoever is nearest, the world is a set
+    // of cubes. A cube switches on wherever a player is and switches off once
+    // nobody has been inside for a while, so the world grows as people explore
+    // and shrinks back afterwards. Asteroids are simply kept inside the union.
+    //
+    // The old bubble had to put a wrapped asteroid somewhere relative to a
+    // player, which is what dropped rocks into people's laps. Here there is a
+    // whole world to choose a spot in, so it can pick one nobody is standing in.
+
+    static int CellIndexOf(float value)
+    {
+        return (int)floorf(value / REGION_CELL_SIZE);
+    }
+
+    int FindRegionCell(int x, int y, int z) const
+    {
+        for (int i = 0; i < regionCellCount; ++i)
+        {
+            if (regionCells[i].X == x && regionCells[i].Y == y && regionCells[i].Z == z)
+                return i;
+        }
+        return -1;
+    }
+
+    void TouchRegionCell(int x, int y, int z, double now)
+    {
+        int existing = FindRegionCell(x, y, z);
+        if (existing != -1)
+        {
+            regionCells[existing].LastOccupied = now;
+            return;
+        }
+
+        if (regionCellCount >= MAX_REGION_CELLS)
+            return;
+
+        regionCells[regionCellCount].X = x;
+        regionCells[regionCellCount].Y = y;
+        regionCells[regionCellCount].Z = z;
+        regionCells[regionCellCount].LastOccupied = now;
+        regionCellCount++;
+    }
+
+    // Switches on the eight cubes meeting at the lattice corner nearest the
+    // player. Lighting only the cube they stand in would leave anyone near an
+    // edge with world on one side and nothing on the other.
+    void TouchRegionAround(const Vector3& position, double now)
+    {
+        const int cx = (int)roundf(position.x / REGION_CELL_SIZE);
+        const int cy = (int)roundf(position.y / REGION_CELL_SIZE);
+        const int cz = (int)roundf(position.z / REGION_CELL_SIZE);
+
+        for (int dx = -1; dx <= 0; ++dx)
+            for (int dy = -1; dy <= 0; ++dy)
+                for (int dz = -1; dz <= 0; ++dz)
+                    TouchRegionCell(cx + dx, cy + dy, cz + dz, now);
+    }
+
+    int RegionCellOf(const Vector3& position) const
+    {
+        return FindRegionCell(CellIndexOf(position.x), CellIndexOf(position.y), CellIndexOf(position.z));
+    }
+
+    void PruneRegionCells(double now)
+    {
+        for (int i = regionCellCount - 1; i >= 0; --i)
+        {
+            if (now - regionCells[i].LastOccupied < REGION_CELL_TTL)
+                continue;
+
+            regionCells[i] = regionCells[regionCellCount - 1];
+            regionCellCount--;
+        }
+    }
+
+    bool IsInsideRegion(const Vector3& position) const
+    {
+        return FindRegionCell(CellIndexOf(position.x), CellIndexOf(position.y), CellIndexOf(position.z)) != -1;
+    }
+
+    Vector3 RandomPointInCell(int index)
+    {
+        if (index < 0 || index >= regionCellCount)
+            return (Vector3){ 0.0f, 0.0f, 0.0f };
+
+        const RegionCell& cell = regionCells[index];
+        return (Vector3){
+            ((float)cell.X + RandBetween(0.05f, 0.95f)) * REGION_CELL_SIZE,
+            ((float)cell.Y + RandBetween(0.05f, 0.95f)) * REGION_CELL_SIZE,
+            ((float)cell.Z + RandBetween(0.05f, 0.95f)) * REGION_CELL_SIZE
+        };
+    }
+
+    float DistanceToNearestPlayer(const Vector3& position) const
+    {
+        float closest = MAX_SQR_V3;
+        for (int i = 0; i < MAX_PLAYERS; ++i)
+        {
+            if (!players[i].Active || !players[i].ValidPosition)
+                continue;
+
+            float distSq = Vector3DistanceSqr(players[i].Position, position);
+            if (distSq < closest) closest = distSq;
+        }
+        return (closest == MAX_SQR_V3) ? -1.0f : sqrtf(closest);
+    }
+
+    // Samples a cube for a spot with room around it. This is what stops an
+    // asteroid being put back into play on top of somebody.
+    Vector3 PickPlacementInCell(int index)
+    {
+        Vector3 best = RandomPointInCell(index);
+        float bestClearance = DistanceToNearestPlayer(best);
+
+        for (int attempt = 1; attempt < 10 && bestClearance < ASTEROID_PLACEMENT_CLEARANCE; ++attempt)
+        {
+            Vector3 candidate = RandomPointInCell(index);
+            float clearance = DistanceToNearestPlayer(candidate);
+
+            // No players positioned yet, so anywhere will do.
+            if (clearance < 0.0f)
+                return candidate;
+
+            if (clearance > bestClearance)
+            {
+                best = candidate;
+                bestClearance = clearance;
+            }
+        }
+
+        return best;
+    }
+
+    int DesiredAsteroidCount() const
+    {
+        // Scales with how much world is switched on, not with how many players
+        // are connected, so the field feels the same however far people spread.
+        int desired = regionCellCount * ASTEROID_PER_CELL;
+        if (desired > ASTEROID_MAX_TOTAL) desired = ASTEROID_MAX_TOTAL;
+        if (desired > MAX_ASTEROIDS) desired = MAX_ASTEROIDS;
+        return desired;
+    }
+
+    bool SpawnAsteroidInCell(int cellIndex)
+    {
+        int slot = AllocateAsteroid();
+        if (slot == -1)
+            return false;
+
+        ServerAsteroid& asteroid = asteroids[slot];
+        asteroid.Position = PickPlacementInCell(cellIndex);
+        asteroid.Velocity = Vector3Scale(RandomDirection(), RandBetween(1.2f, 3.2f));
+        asteroid.Scale = RandBetween(0.85f, 1.45f);
+        return true;
+    }
+
+    int EmptiestRegionCell()
+    {
+        if (regionCellCount == 0)
+            return -1;
+
+        int perCell[MAX_REGION_CELLS] = { 0 };
+        for (int i = 0; i < MAX_ASTEROIDS; ++i)
+        {
+            if (!asteroids[i].Active)
+                continue;
+
+            int cell = RegionCellOf(asteroids[i].Position);
+            if (cell >= 0) perCell[cell]++;
+        }
+
+        int emptiest = 0;
+        for (int i = 1; i < regionCellCount; ++i)
+        {
+            if (perCell[i] < perCell[emptiest]) emptiest = i;
+        }
+        return emptiest;
+    }
+
+    // Tops the field up, always filling whichever cube has the fewest asteroids.
+    // Spreading spawns at random instead left a player who had just arrived
+    // somewhere new sitting in an empty sky, because their fresh cubes were only
+    // as likely to be chosen as every long-settled one.
+    void MaintainAsteroidPopulation()
+    {
+        const int desired = DesiredAsteroidCount();
+        if (liveAsteroids >= desired || regionCellCount == 0)
+            return;
+
+        int perCell[MAX_REGION_CELLS] = { 0 };
+        for (int i = 0; i < MAX_ASTEROIDS; ++i)
+        {
+            if (!asteroids[i].Active)
+                continue;
+
+            int cell = RegionCellOf(asteroids[i].Position);
+            if (cell >= 0) perCell[cell]++;
+        }
+
+        for (int n = 0; n < ASTEROID_SPAWNS_PER_TICK && liveAsteroids < desired; ++n)
+        {
+            int emptiest = 0;
+            for (int i = 1; i < regionCellCount; ++i)
+            {
+                if (perCell[i] < perCell[emptiest]) emptiest = i;
+            }
+
+            if (!SpawnAsteroidInCell(emptiest))
+                break;
+
+            perCell[emptiest]++;
+        }
+    }
+
+    bool BreakAsteroid(uint32_t asteroidId)
+    {
+        int slot = FindAsteroidById(asteroidId);
+        if (slot == -1)
             return false;
 
         double now = GetClockSeconds();
-        if (now - asteroidHitCooldown[id] < 0.1)
+
+        // Two clients can report the same hit before either hears back, so a
+        // second report this soon is ignored.
+        if (asteroids[slot].LastHitTime > 0.0 && now - asteroids[slot].LastHitTime < 0.1)
             return false;
 
-        asteroidHitCooldown[id] = now;
+        ServerAsteroid parent = asteroids[slot];
 
-        AsteroidInfo& asteroid = asteroids[id];
+        // Freed before the fragments are allocated, so a split never has to
+        // compete with its own parent for a slot.
+        ReleaseAsteroid(slot);
 
-        if (asteroid.Scale <= MIN_ASTEROID_SCALE)
-        {
-            asteroids[id] = CreateAsteroid();
-            return true;
-        }
+        float childScale = parent.Scale * ASTEROID_SPLIT_FACTOR;
+        if (childScale < MIN_ASTEROID_SCALE)
+            return true; // Too small to be worth splitting: it just shatters.
 
-        float splitScale = asteroid.Scale * 0.7f;
-
-        Vector3 tangent = Vector3Normalize((Vector3){ asteroid.Velocity.z, asteroid.Velocity.y, -asteroid.Velocity.x });
-
+        // The two pieces are pushed out sideways from the direction the rock was
+        // going, so they visibly fly apart instead of following its old path.
+        Vector3 tangent = Vector3CrossProduct(parent.Velocity, RandomDirection());
         if (Vector3LengthSqr(tangent) < 0.0001f)
             tangent = (Vector3){ 1.0f, 0.0f, 0.0f };
+        tangent = Vector3Normalize(tangent);
 
-        Vector3 splitOffset = Vector3Scale(tangent, asteroid.Scale * 1.1f);
+        Vector3 separation = Vector3Scale(tangent, parent.Scale * 1.1f);
+        const float kick = 1.75f;
 
-        AsteroidInfo leftAsteroid = asteroid;
-        AsteroidInfo rightAsteroid = asteroid;
-
-        leftAsteroid.Scale = splitScale;
-        rightAsteroid.Scale = splitScale;
-
-        leftAsteroid.Position = Vector3Add(asteroid.Position, splitOffset);
-        rightAsteroid.Position = Vector3Subtract(asteroid.Position, splitOffset);
-
-        leftAsteroid.Velocity = Vector3Add(asteroid.Velocity, Vector3Scale(tangent, 1.75f));
-        rightAsteroid.Velocity = Vector3Subtract(asteroid.Velocity, Vector3Scale(tangent, 1.75f));
-
-        leftAsteroid.Active = true;
-        rightAsteroid.Active = true;
-
-        if (asteroidAmount + 1 < MAX_ASTEROIDS)
+        for (int side = 0; side < 2; ++side)
         {
-            asteroids[id] = leftAsteroid;
-            asteroids[asteroidAmount] = rightAsteroid;
-            asteroidHitCooldown[asteroidAmount] = now;
-            asteroidAmount += 1;
-        }
-        else
-        {
-            asteroids[id] = CreateAsteroid();
+            int childSlot = AllocateAsteroid();
+            if (childSlot == -1)
+                break;
+
+            float sign = (side == 0) ? 1.0f : -1.0f;
+            ServerAsteroid& child = asteroids[childSlot];
+            child.Position = Vector3Add(parent.Position, Vector3Scale(separation, sign));
+            child.Velocity = Vector3Add(parent.Velocity, Vector3Scale(tangent, kick * sign));
+            child.Scale = childScale;
+            child.LastHitTime = now;
         }
 
         return true;
@@ -221,6 +526,8 @@ private:
         players[playerId].Position = { 0.0f, 0.0f, 0.0f };
         players[playerId].Rotation = MatrixIdentity();
         players[playerId].Score = 0;
+        players[playerId].LastInputTime = GetClockSeconds();
+        players[playerId].KilledAt = -1.0;
 
         PlayerPacket acceptBuffer = {};
         acceptBuffer.Command = static_cast<int>(NetworkCommands::AcceptPlayer);
@@ -236,7 +543,7 @@ private:
             otherBuffer.Command = static_cast<int>(NetworkCommands::AddPlayer);
             otherBuffer.Id = i;
             std::memset(otherBuffer.Name, 0, sizeof(otherBuffer.Name));
-            if (players[i].Name[0] != '\0')
+            if (players[i].Name[0] != 0)
                 std::strncpy(otherBuffer.Name, players[i].Name, sizeof(otherBuffer.Name) - 1);
             otherBuffer.Position = players[i].Position;
             otherBuffer.Rotation = players[i].Rotation;
@@ -253,7 +560,7 @@ private:
 
         players[playerId].Active = false;
         players[playerId].ConnId = -1;
-        players[playerId].Name[0] = '\0';
+        players[playerId].Name[0] = 0;
         players[playerId].Position = { 0.0f, 0.0f, 0.0f };
         players[playerId].Rotation = MatrixIdentity();
         players[playerId].ValidPosition = false;
@@ -266,62 +573,82 @@ private:
 
     void UpdateAsteroids(double delta)
     {
-        if (asteroidAmount < 10)
-        {
-            SpawnAsteroids(1);
-        }
+        const double now = GetClockSeconds();
 
-        for (int i = 0; i < asteroidAmount; ++i)
+        // The world tracks where people actually are: a cube switches on under
+        // each player and switches off once it has been empty for a while.
+        for (int i = 0; i < MAX_PLAYERS; ++i)
         {
-            AsteroidInfo& asteroid = asteroids[i];
+            if (players[i].Active && players[i].ValidPosition)
+                TouchRegionAround(players[i].Position, now);
+        }
+        PruneRegionCells(now);
+
+        MaintainAsteroidPopulation();
+
+        const int desired = DesiredAsteroidCount();
+
+        for (int i = 0; i < MAX_ASTEROIDS; ++i)
+        {
+            ServerAsteroid& asteroid = asteroids[i];
+            if (!asteroid.Active)
+                continue;
+
             asteroid.Position = Vector3Add(asteroid.Position, Vector3Scale(asteroid.Velocity, (float)delta));
 
-            Vector3 closestPos = { 0.0f, 0.0f, 0.0f };
-            float closestDistSq = MAX_SQR_V3;
-            for (int j = 0; j < MAX_PLAYERS; ++j)
-            {
-                if (!players[j].Active)
-                    continue;
+            if (IsInsideRegion(asteroid.Position))
+                continue;
 
-                float distSq = Vector3DistanceSqr(players[j].Position, asteroid.Position);
-                if (distSq < closestDistSq)
-                {
-                    closestDistSq = distSq;
-                    closestPos = players[j].Position;
-                }
+            // Outside the world. Leave it be until it is far enough away that
+            // moving it cannot be seen happening.
+            float distance = DistanceToNearestPlayer(asteroid.Position);
+            if (distance >= 0.0f && distance < ASTEROID_RELOCATE_DISTANCE)
+                continue;
+
+            // Surplus from splits is dropped here rather than put back.
+            if (liveAsteroids > desired)
+            {
+                ReleaseAsteroid(i);
+                continue;
             }
 
-            if (asteroid.Position.x > closestPos.x + MAX_ASTEROID_DIST)
-                asteroid.Position.x = closestPos.x - MAX_ASTEROID_DIST;
-            else if (asteroid.Position.x < closestPos.x - MAX_ASTEROID_DIST)
-                asteroid.Position.x = closestPos.x + MAX_ASTEROID_DIST;
-
-            if (asteroid.Position.y > closestPos.y + MAX_ASTEROID_DIST)
-                asteroid.Position.y = closestPos.y - MAX_ASTEROID_DIST;
-            else if (asteroid.Position.y < closestPos.y - MAX_ASTEROID_DIST)
-                asteroid.Position.y = closestPos.y + MAX_ASTEROID_DIST;
-
-            if (asteroid.Position.z > closestPos.z + MAX_ASTEROID_DIST)
-                asteroid.Position.z = closestPos.z - MAX_ASTEROID_DIST;
-            else if (asteroid.Position.z < closestPos.z - MAX_ASTEROID_DIST)
-                asteroid.Position.z = closestPos.z + MAX_ASTEROID_DIST;
+            // Put back somewhere in the world with room around it, instead of
+            // mirrored through whoever happened to be nearest.
+            asteroid.Position = PickPlacementInCell(EmptiestRegionCell());
+            asteroid.Velocity = Vector3Scale(RandomDirection(), RandBetween(1.2f, 3.2f));
         }
 
         static int networkTickCounter = 0;
-        networkTickCounter++;
+        if (++networkTickCounter < ASTEROID_BROADCAST_EVERY)
+            return;
 
-        // Broadcast network data only 5 times a second (30Hz / 6)
-        if (networkTickCounter >= 6)
+        networkTickCounter = 0;
+        BroadcastAsteroids();
+    }
+
+    // Only asteroids that actually exist are sent, and the packet is cut down to
+    // fit just those; see AsteroidPacketSize.
+    void BroadcastAsteroids()
+    {
+        AsteroidInfoPacket buffer = {};
+        buffer.Command = static_cast<int>(NetworkCommands::UpdateAsteroid);
+
+        int count = 0;
+        for (int i = 0; i < MAX_ASTEROIDS && count < MAX_ASTEROIDS; ++i)
         {
-            AsteroidInfoPacket buffer = {};
-            buffer.Command = static_cast<int>(NetworkCommands::UpdateAsteroid);
-            memcpy(buffer.AllAsteroids, asteroids, sizeof(asteroids));
-            buffer.AsteroidCount = asteroidAmount;
+            if (!asteroids[i].Active)
+                continue;
 
-            SendPacketToAllBut(&buffer, sizeof(buffer), -1);
-
-            networkTickCounter = 0;
+            AsteroidInfo& out = buffer.Asteroids[count++];
+            out.Id = asteroids[i].Id;
+            out.Seed = asteroids[i].Seed;
+            out.Position = asteroids[i].Position;
+            out.Velocity = asteroids[i].Velocity;
+            out.Scale = asteroids[i].Scale;
         }
+
+        buffer.AsteroidCount = count;
+        SendPacketToAllBut(&buffer, AsteroidPacketSize(count), -1);
     }
 
     void HandlePlayerPacket(WebSocketServer::ConnId connId, const PlayerPacket& received)
@@ -330,99 +657,157 @@ private:
         if (playerId == -1)
             return;
 
-        if (received.Command == static_cast<int>(NetworkCommands::UpdateInput))
+        if (received.Name[0] != 0)
         {
-            if (received.Name[0] != '\0')
-            {
-                std::memset(players[playerId].Name, 0, sizeof(players[playerId].Name));
-                std::strncpy(players[playerId].Name, received.Name, sizeof(players[playerId].Name) - 1);
-            }
-
-            bool wasFirstUpdate = !players[playerId].ValidPosition;
-
-            players[playerId].Position = received.Position;
-            players[playerId].Rotation = received.Rotation;
-            players[playerId].ValidPosition = true;
-
-            // Announce to everyone else only once we know the player's name and
-            // position, so they never appear as an unnamed ghost.
-            if (wasFirstUpdate)
-            {
-                PlayerPacket addPacket = {};
-                addPacket.Command = static_cast<int>(NetworkCommands::AddPlayer);
-                addPacket.Id = playerId;
-                std::strncpy(addPacket.Name, players[playerId].Name, sizeof(addPacket.Name) - 1);
-                addPacket.Position = players[playerId].Position;
-                addPacket.Rotation = players[playerId].Rotation;
-                SendPacketToAllBut(&addPacket, sizeof(addPacket), playerId);
-
-                UpdateScoreboard();
-            }
-
-            PlayerPacket updatePlayerPacket = {};
-            updatePlayerPacket.Command = static_cast<int>(NetworkCommands::UpdatePlayer);
-            updatePlayerPacket.Id = playerId;
-            std::memset(updatePlayerPacket.Name, 0, sizeof(updatePlayerPacket.Name));
-            if (players[playerId].Name[0] != '\0')
-                std::strncpy(updatePlayerPacket.Name, players[playerId].Name, sizeof(updatePlayerPacket.Name) - 1);
-            updatePlayerPacket.Position = players[playerId].Position;
-            updatePlayerPacket.Rotation = players[playerId].Rotation;
-            SendPacketToAllBut(&updatePlayerPacket, sizeof(updatePlayerPacket), playerId);
+            std::memset(players[playerId].Name, 0, sizeof(players[playerId].Name));
+            std::strncpy(players[playerId].Name, received.Name, sizeof(players[playerId].Name) - 1);
         }
+
+        bool wasFirstUpdate = !players[playerId].ValidPosition;
+
+        players[playerId].Position = received.Position;
+        players[playerId].Rotation = received.Rotation;
+        players[playerId].ValidPosition = true;
+        players[playerId].LastInputTime = GetClockSeconds();
+
+        // Announce to everyone else only once we know the player's name and
+        // position, so they never appear as an unnamed ghost.
+        if (wasFirstUpdate)
+        {
+            PlayerPacket addPacket = {};
+            addPacket.Command = static_cast<int>(NetworkCommands::AddPlayer);
+            addPacket.Id = playerId;
+            std::strncpy(addPacket.Name, players[playerId].Name, sizeof(addPacket.Name) - 1);
+            addPacket.Position = players[playerId].Position;
+            addPacket.Rotation = players[playerId].Rotation;
+            SendPacketToAllBut(&addPacket, sizeof(addPacket), playerId);
+
+            UpdateScoreboard();
+        }
+
+        PlayerPacket updatePlayerPacket = {};
+        updatePlayerPacket.Command = static_cast<int>(NetworkCommands::UpdatePlayer);
+        updatePlayerPacket.Id = playerId;
+        std::memset(updatePlayerPacket.Name, 0, sizeof(updatePlayerPacket.Name));
+        if (players[playerId].Name[0] != 0)
+            std::strncpy(updatePlayerPacket.Name, players[playerId].Name, sizeof(updatePlayerPacket.Name) - 1);
+        updatePlayerPacket.Position = players[playerId].Position;
+        updatePlayerPacket.Rotation = players[playerId].Rotation;
+        SendPacketToAllBut(&updatePlayerPacket, sizeof(updatePlayerPacket), playerId);
     }
 
+    // Dispatched on the leading command field; see PeekCommand.
     void OnMessage(WebSocketServer::ConnId connId, const uint8_t* data, size_t len)
     {
-        if (len == sizeof(PlayerPacket))
+        switch (PeekCommand(data, len))
         {
-            PlayerPacket received = {};
-            memcpy(&received, data, sizeof(PlayerPacket));
-            HandlePlayerPacket(connId, received);
-        }
-        else if (len == sizeof(AsteroidDestroyPacket))
-        {
-            AsteroidDestroyPacket received = {};
-            memcpy(&received, data, sizeof(AsteroidDestroyPacket));
+            case NetworkCommands::UpdateInput:
+            {
+                if (len != sizeof(PlayerPacket))
+                    return;
 
-            if (received.Command == static_cast<int>(NetworkCommands::DestroyAsteroid))
-            {
-                if (received.AsteroidID >= 0 && received.AsteroidID < asteroidAmount &&
-                    received.PlayerID >= 0 && received.PlayerID < MAX_PLAYERS)
-                {
-                    if (BreakAsteroid(received.AsteroidID))
-                    {
-                        players[received.PlayerID].Score += BASE_SCORE;
-                        UpdateScoreboard();
-                    }
-                }
+                PlayerPacket received = {};
+                memcpy(&received, data, sizeof(PlayerPacket));
+                HandlePlayerPacket(connId, received);
+                break;
             }
-        }
-        else if (len == sizeof(ScoreboardPacket))
-        {
-            ScoreboardPacket received = {};
-            memcpy(&received, data, sizeof(ScoreboardPacket));
-            if (received.Command == static_cast<int>(NetworkCommands::ResetScoreboardId))
+
+            case NetworkCommands::DestroyAsteroid:
             {
-                for (int i = 0; i < MAX_PLAYERS; ++i)
+                if (len != sizeof(AsteroidDestroyPacket))
+                    return;
+
+                AsteroidDestroyPacket received = {};
+                memcpy(&received, data, sizeof(AsteroidDestroyPacket));
+
+                // The scoring player is taken from the connection rather than the
+                // packet, so a client cannot bank points into someone else's slot.
+                int playerId = GetPlayerId(connId);
+                if (playerId == -1)
+                    return;
+
+                if (BreakAsteroid(received.AsteroidId))
                 {
-                    if (players[i].Active && i == received.Id)
-                    {
-                        players[i].Score = 0;
-                        break;
-                    }
+                    players[playerId].Score += BASE_SCORE;
+                    UpdateScoreboard();
                 }
+                break;
+            }
+
+            case NetworkCommands::PlayerKilled:
+            {
+                if (len != sizeof(PlayerKillPacket))
+                    return;
+
+                // The killer is taken from the connection, so a client can only
+                // ever claim its own kills, never award them to someone else.
+                int killerId = GetPlayerId(connId);
+                if (killerId == -1)
+                    return;
+
+                PlayerKillPacket received = {};
+                memcpy(&received, data, sizeof(PlayerKillPacket));
+
+                const int victimId = received.VictimId;
+                if (victimId < 0 || victimId >= MAX_PLAYERS || victimId == killerId || !players[victimId].Active)
+                    return;
+
+                const double now = GetClockSeconds();
+
+                // A client that has stopped running frames never processes the
+                // respawn it is sent, so its ship stays put. Without these two
+                // checks that abandoned ship is worth points over and over.
+                if (now - players[victimId].LastInputTime > PLAYER_STALE_SECONDS)
+                    return;
+
+                if (players[victimId].KilledAt > 0.0 && now - players[victimId].KilledAt < KILL_COOLDOWN_SECONDS)
+                    return;
+
+                players[victimId].KilledAt = now;
+
+                // Dying costs the same whether it was a rock or another player.
+                players[victimId].Score = 0;
+                players[killerId].Score += KILL_SCORE;
+
+                // The victim is told so it can respawn; it had no way to know,
+                // since the shot was judged on the shooter's screen.
+                PlayerKillPacket notify = {};
+                notify.Command = static_cast<int>(NetworkCommands::PlayerKilled);
+                notify.KillerId = killerId;
+                notify.VictimId = victimId;
+                SendPacketToOnly(&notify, sizeof(notify), victimId);
+
                 UpdateScoreboard();
+                break;
             }
-        }
-        else if (len == sizeof(ProjectilePacket))
-        {
-            ProjectilePacket received = {};
-            memcpy(&received, data, sizeof(ProjectilePacket));
 
-            if (received.Command == static_cast<int>(NetworkCommands::FireProjectile))
+            case NetworkCommands::ResetScoreboardId:
             {
-                SendPacketToAllBut(&received, sizeof(received), received.PlayerID);
+                if (len != sizeof(ScoreboardPacket))
+                    return;
+
+                int playerId = GetPlayerId(connId);
+                if (playerId == -1)
+                    return;
+
+                players[playerId].Score = 0;
+                UpdateScoreboard();
+                break;
             }
+
+            case NetworkCommands::FireProjectile:
+            {
+                if (len != sizeof(ProjectilePacket))
+                    return;
+
+                ProjectilePacket received = {};
+                memcpy(&received, data, sizeof(ProjectilePacket));
+                SendPacketToAllBut(&received, sizeof(received), GetPlayerId(connId));
+                break;
+            }
+
+            default:
+                break;
         }
     }
 
@@ -436,6 +821,11 @@ private:
             {
                 UpdateAsteroids(SERVER_TICK_INTERVAL);
                 nextTick += SERVER_TICK_INTERVAL;
+
+                // After a long pause the loop would otherwise race to catch up
+                // on every missed tick. Skip them and carry on from now.
+                if (now - nextTick > SERVER_TICK_INTERVAL * 5.0)
+                    nextTick = now + SERVER_TICK_INTERVAL;
             }
 
             wsServer.Poll(0,
@@ -443,10 +833,7 @@ private:
                 {
                     int playerId = InitializeNewPlayer(connId);
                     if (playerId != -1)
-                    {
-                        SpawnAsteroids(10);
                         UpdateScoreboard();
-                    }
                 },
                 [this](WebSocketServer::ConnId connId, const uint8_t* data, size_t len)
                 {

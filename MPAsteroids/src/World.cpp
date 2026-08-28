@@ -35,12 +35,23 @@ void World::Update(double delta)
     
     if (PlayerShip.isFiring) {
         Vector3 velocity = Vector3Scale(PlayerShip.GetForwardVector(), PlayerShip.LASER_SPEED);
-        FireProjectile(PlayerShip.Position, velocity);
+        FireProjectile(PlayerShip.Position, velocity, Net.GetLocalPlayerId());
         Net.SendProjectile(PlayerShip.Position, velocity);
     }
 
+    // Shots that arrived while this tab was in the background have been sitting
+    // in the queue. Spawning them as-is puts a whole volley back at its firing
+    // point at once, so each is caught up to where it should be by now, and any
+    // that would already have faded is dropped rather than replayed.
     for (int i = 0; i < Net.RemoteProjectileCount; i++) {
-        FireProjectile(Net.RemoteProjectilesQueue[i].Position, Net.RemoteProjectilesQueue[i].Velocity);
+        const NetClient::RemoteProjectileEvent& shot = Net.RemoteProjectilesQueue[i];
+        const float age = (float)Net.QueuedProjectileAge(i);
+
+        if (age >= PROJECTILE_LIFETIME)
+            continue;
+
+        Vector3 caughtUp = Vector3Add(shot.Position, Vector3Scale(shot.Velocity, age));
+        FireProjectile(caughtUp, shot.Velocity, shot.PlayerId, PROJECTILE_LIFETIME - age);
     }
     Net.RemoteProjectileCount = 0;
     
@@ -48,7 +59,18 @@ void World::Update(double delta)
     
     Net.UpdateLocalPlayer(PlayerShip.Position, PlayerShip.Rotation);
     Net.NetUpdate(GetTime(), delta);
-    CreateAsteroidCollision();
+
+    // The shooter decides hits, so being killed arrives as a message rather
+    // than something we detect ourselves.
+    int killerId = -1;
+    if (Net.ConsumeKilled(&killerId))
+    {
+        Vector3 hitPosition = PlayerShip.Position;
+        PlayerShip.Respawn();
+        Sounds::PlayHurt(hitPosition, PlayerShip.Position);
+    }
+
+    RefreshAsteroidFrame();
     CheckCollisions();
 }
 
@@ -105,6 +127,9 @@ void World::DrawPlayerIndicators(const PlayerIndicator* otherPlayersData, int ot
         const char* playerName = otherPlayersData[i].name;
 
         float distance = Vector3Distance(camera.position, targetPos);
+        if (distance > PLAYER_INDICATOR_RANGE)
+            continue;
+
         Vector2 screenPos = GetWorldToScreen(targetPos, camera);
 
         Vector3 forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
@@ -151,6 +176,7 @@ void World::UpdateProjectiles(double delta)
     {
         if (Projectiles[i].active)
         {
+            Projectiles[i].previousPosition = Projectiles[i].position;
             Projectiles[i].position = Vector3Add(Projectiles[i].position, Vector3Scale(Projectiles[i].velocity, delta));
             Projectiles[i].lifeTime -= delta;
             
@@ -162,16 +188,18 @@ void World::UpdateProjectiles(double delta)
     }
 }
 
-void World::FireProjectile(Vector3 position, Vector3 velocity)
+void World::FireProjectile(Vector3 position, Vector3 velocity, int ownerId, float lifeTime)
 {
     for (int i = 0; i < MAX_PROJECTILES; i++)
     {
         if (!Projectiles[i].active)
         {
             Projectiles[i].active = true;
+            Projectiles[i].ownerId = ownerId;
             Projectiles[i].position = position;
+            Projectiles[i].previousPosition = position;
             Projectiles[i].velocity = velocity;
-            Projectiles[i].lifeTime = 2.0f;
+            Projectiles[i].lifeTime = lifeTime;
             break;
         }
     }
@@ -183,126 +211,259 @@ void World::DrawProjectiles()
     {
         if (Projectiles[i].active)
         {
-            DrawSphere(Projectiles[i].position, 0.15f, WHITE);
+            DrawSphere(Projectiles[i].position, 0.1f, WHITE);
         }
     }
+}
+
+// Walks the network's asteroid list once a frame. Drawing and both collision
+// checks read from this instead of asking again, so each asteroid's rotation is
+// worked out once a frame rather than once for every job that needs it.
+void World::RefreshAsteroidFrame()
+{
+    NetClient& Net = GameApp::GetInstance()->GetNet();
+
+    AsteroidFrameCount = 0;
+
+    const int count = Net.GetAsteroidCount();
+    for (int i = 0; i < count && AsteroidFrameCount < MAX_ASTEROIDS; i++)
+    {
+        Vector3 position = { 0.0f, 0.0f, 0.0f };
+        Matrix rotation = MatrixIdentity();
+        float scale = 1.0f;
+
+        if (!Net.GetAsteroidSpatial(i, &position, &rotation, &scale))
+            continue;
+
+        AsteroidFrame& frame = AsteroidFrames[AsteroidFrameCount++];
+        frame.Id = Net.GetAsteroidId(i);
+        frame.Position = position;
+        frame.Rotation = rotation;
+        frame.Scale = scale;
+        frame.Radius = Models::AsteroidRadiusLocal * scale;
+        frame.BodyRadius = Models::AsteroidBodyRadius * scale;
+    }
+}
+
+// Moves a world point into a model's own space. These rotations are pure, so
+// transposing one inverts it. Testing there means the result does not change
+// with the model's orientation, which an axis-aligned world box cannot manage:
+// enclosing a rotated box makes it up to 75% wider, and a spinning asteroid
+// would grab at players from most of a rock's width away.
+static Vector3 ToLocalSpace(Vector3 worldPoint, Vector3 origin, const Matrix& rotation)
+{
+    return Vector3Transform(Vector3Subtract(worldPoint, origin), MatrixTranspose(rotation));
+}
+
+// How many points to test along one frame of travel. A shot covers half a unit
+// per frame at 60fps but three units at the frame-time cap, which is wider than
+// a ship, so testing only where it ended up would let it step clean over.
+static int SweepSamples(Vector3 from, Vector3 to)
+{
+    const int MAX_SAMPLES = 8;
+    int samples = (int)(Vector3Distance(from, to) / PROJECTILE_HIT_RADIUS) + 1;
+    return samples > MAX_SAMPLES ? MAX_SAMPLES : samples;
 }
 
 void World::CheckProjectileCollisions()
 {
     Player& PlayerShip = GameApp::GetInstance()->GetPlayer();
     NetClient& Net = GameApp::GetInstance()->GetNet();
-    
+
     for (int p = 0; p < MAX_PROJECTILES; p++)
     {
         if (!Projectiles[p].active) continue;
 
-        for (int a = 0; a < Net.GetMaxAsteroids(); a++)
+        for (int a = 0; a < AsteroidFrameCount; a++)
         {
-            if (CheckCollisionBoxSphere(AsteroidBoundingBoxes[a], Projectiles[p].position, 0.5f))
+            AsteroidFrame& frame = AsteroidFrames[a];
+
+            // Cheap reject against the whole step, widened so nothing close is
+            // thrown away before the sweep gets a look at it.
+            float reach = frame.Radius + PROJECTILE_HIT_RADIUS
+                        + Vector3Distance(Projectiles[p].previousPosition, Projectiles[p].position);
+            if (Vector3DistanceSqr(frame.Position, Projectiles[p].position) > reach * reach)
+                continue;
+
+            // Exact: a sphere against the rock's own box, in the rock's space.
+            BoundingBox body = Models::AsteroidBoxLocal;
+            body.min = Vector3Scale(body.min, frame.Scale);
+            body.max = Vector3Scale(body.max, frame.Scale);
+
+            const int samples = SweepSamples(Projectiles[p].previousPosition, Projectiles[p].position);
+            bool hit = false;
+            for (int step = 1; step <= samples && !hit; step++)
             {
-                Projectiles[p].active = false; 
-
-                Vector3 asteroidPosition = { 0.0f, 0.0f, 0.0f };
-                Matrix asteroidRotation = MatrixIdentity();
-                if (Net.GetAsteroidSpatial(a, &asteroidPosition, &asteroidRotation))
-                {
-                    Sounds::PlayExplosion(asteroidPosition, PlayerShip.Position);
-                }
-
-                Net.HandleDestroyAsteroid(Net.GetLocalPlayerId(), a);
-                
-                AsteroidBoundingBoxes[a].min = { 0.0f, 0.0f, 0.0f };
-                AsteroidBoundingBoxes[a].max = { 0.0f, 0.0f, 0.0f };
-                
-                break; 
+                Vector3 along = Vector3Lerp(Projectiles[p].previousPosition, Projectiles[p].position,
+                                            (float)step / (float)samples);
+                hit = CheckCollisionBoxSphere(body, ToLocalSpace(along, frame.Position, frame.Rotation),
+                                              PROJECTILE_HIT_RADIUS);
             }
+
+            if (!hit)
+                continue;
+
+            Projectiles[p].active = false;
+            Sounds::PlayExplosion(frame.Position, PlayerShip.Position);
+
+            Net.ReportAsteroidDestroyed(frame.Id);
+
+            // Dropped from this frame's list so nothing else can hit the same
+            // asteroid before the server's next broadcast arrives.
+            AsteroidFrames[a] = AsteroidFrames[--AsteroidFrameCount];
+            break;
         }
     }
 }
+
+bool World::CheckShipCollisions()
+{
+    Player& PlayerShip = GameApp::GetInstance()->GetPlayer();
+    NetClient& Net = GameApp::GetInstance()->GetNet();
+
+    for (int i = 0; i < AsteroidFrameCount; i++)
+    {
+        AsteroidFrame& frame = AsteroidFrames[i];
+
+        float reach = frame.Radius + Models::ShipRadiusLocal;
+        if (Vector3DistanceSqr(frame.Position, PlayerShip.Position) > reach * reach)
+            continue;
+
+        // The ship keeps its real shape, since that is what the player is
+        // steering; the rock is near enough a ball to treat as one.
+        Vector3 local = ToLocalSpace(frame.Position, PlayerShip.Position, PlayerShip.Rotation);
+        if (!CheckCollisionBoxSphere(Models::ShipBoxLocal, local, frame.BodyRadius))
+            continue;
+
+        Vector3 hitPosition = PlayerShip.Position;
+        PlayerShip.Respawn();
+        Sounds::PlayHurt(hitPosition, PlayerShip.Position);
+
+        Net.HandlePlayerCollision();
+        Net.ReportAsteroidDestroyed(frame.Id);
+
+        AsteroidFrames[i] = AsteroidFrames[--AsteroidFrameCount];
+        return true;
+    }
+
+    return false;
+}
+
+// Our shots against everyone else's ships. The shooter judges this, not the
+// target: it tests against the very positions it is drawing, so a hit lands when
+// it looks like it should. Letting the target decide meant nothing registered
+// while its browser tab was in the background and had stopped running frames.
+bool World::CheckOutgoingFire()
+{
+    Player& PlayerShip = GameApp::GetInstance()->GetPlayer();
+    NetClient& Net = GameApp::GetInstance()->GetNet();
+
+    const int localId = Net.GetLocalPlayerId();
+    if (localId < 0)
+        return false;
+
+    for (int p = 0; p < MAX_PROJECTILES; p++)
+    {
+        if (!Projectiles[p].active) continue;
+
+        // Only our own shots; everyone else scores their own.
+        if (Projectiles[p].ownerId != localId) continue;
+
+        const float travel = Vector3Distance(Projectiles[p].previousPosition, Projectiles[p].position);
+        const int samples = SweepSamples(Projectiles[p].previousPosition, Projectiles[p].position);
+
+        for (int i = 0; i < MAX_PLAYERS; i++)
+        {
+            Vector3 targetPos = { 0.0f, 0.0f, 0.0f };
+            Matrix targetRot = MatrixIdentity();
+
+            // Skips us and anyone not in the world yet.
+            if (!Net.GetPlayerSpatial(i, &targetPos, &targetRot))
+                continue;
+
+            // Still drawn, but not shootable: their ship is sitting where we
+            // last heard from them rather than where they actually are.
+            if (Net.IsPlayerStale(i))
+                continue;
+
+            float reach = Models::ShipRadiusLocal + PROJECTILE_HIT_RADIUS + travel;
+            if (Vector3DistanceSqr(targetPos, Projectiles[p].position) > reach * reach)
+                continue;
+
+            bool hit = false;
+            for (int step = 1; step <= samples && !hit; step++)
+            {
+                Vector3 along = Vector3Lerp(Projectiles[p].previousPosition, Projectiles[p].position,
+                                            (float)step / (float)samples);
+                hit = CheckCollisionBoxSphere(Models::ShipBoxLocal,
+                                              ToLocalSpace(along, targetPos, targetRot),
+                                              PROJECTILE_HIT_RADIUS);
+            }
+
+            if (!hit)
+                continue;
+
+            Projectiles[p].active = false;
+            Sounds::PlayExplosion(targetPos, PlayerShip.Position);
+
+            // The server clears their score, credits ours, and tells them to respawn.
+            Net.ReportKill(i);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void World::CheckCollisions()
+{
+    // Hitting a rock respawns us, which moves the ship, so stop there.
+    if (CheckShipCollisions()) return;
+
+    CheckOutgoingFire();
+    CheckProjectileCollisions();
+}
+
 void World::DrawPlayerModels()
-{   
+{
     NetClient& Net = GameApp::GetInstance()->GetNet();
 
     for (int i = 0; i < MAX_PLAYERS; i++)
     {
         Vector3 pos = { 0.0f, 0.0f, 0.0f };
         Matrix rot = MatrixIdentity();
-        if(Net.GetPlayerSpatial(i, &pos, &rot))
-        {   
+        if (Net.GetPlayerSpatial(i, &pos, &rot))
+        {
             Models::DrawModel(Models::ShipModel, pos, rot);
         }
     }
 }
 
-
-
 void World::DrawAsteroidModels()
 {
-    NetClient& Net = GameApp::GetInstance()->GetNet();
+    Camera3D camera = GameApp::GetInstance()->GetCamera();
 
-    for(int i = 0; i < Net.GetMaxAsteroids(); i++)
+    Vector3 viewForward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+
+    // Asteroids the server has not put back yet can sit well outside the world,
+    // and there is no point drawing those.
+    const float cullDistance = ASTEROID_DRAW_DISTANCE;
+
+    for (int i = 0; i < AsteroidFrameCount; i++)
     {
-        Vector3 pos = { 0.0f, 0.0f, 0.0f };
-        Matrix rot = MatrixIdentity();
-        float scale = 1.0f;
-        if(Net.GetAsteroidSpatial(i, &pos, &rot, &scale))
-        {   
-            Models::DrawModel(Models::AsteroidModel, pos, rot, scale);
-        }
+        const AsteroidFrame& frame = AsteroidFrames[i];
+
+        Vector3 toAsteroid = Vector3Subtract(frame.Position, camera.position);
+        float distanceSq = Vector3LengthSqr(toAsteroid);
+
+        if (distanceSq > cullDistance * cullDistance)
+            continue;
+
+        // Behind the camera by more than its own radius, so it cannot be on
+        // screen no matter how wide the field of view is.
+        if (Vector3DotProduct(viewForward, toAsteroid) < -frame.Radius)
+            continue;
+
+        Models::DrawModel(Models::AsteroidModel, frame.Position, frame.Rotation, frame.Scale);
     }
 }
-
-void World::CreateAsteroidCollision()
-{
-    NetClient& Net = GameApp::GetInstance()->GetNet();
-
-    for(int i = 0; i < Net.GetMaxAsteroids(); i++)
-    {
-        Vector3 pos = { 0.0f, 0.0f, 0.0f };
-        Matrix rot = MatrixIdentity();
-        float scale = 1.0f;
-        if(Net.GetAsteroidSpatial(i, &pos, &rot, &scale))
-        {   
-            BoundingBox localBox = Models::AsteroidBoxLocal;
-            localBox.min = Vector3Scale(localBox.min, scale);
-            localBox.max = Vector3Scale(localBox.max, scale);
-            AsteroidBoundingBoxes[i] = Models::GetWorldBoundingBox(localBox, pos, rot);
-        }
-    }
-}
-
-void World::CheckShipCollisions(BoundingBox asteroidBox, int asteroidId)
-{
-    Player& PlayerShip = GameApp::GetInstance()->GetPlayer();
-    NetClient& Net = GameApp::GetInstance()->GetNet();
-
-    BoundingBox PlayerBox = Models::GetWorldBoundingBox(Models::ShipBoxLocal, PlayerShip.Position, PlayerShip.Rotation);
-
-    if(CheckCollisionBoxes(PlayerBox, asteroidBox))
-    {
-        Vector3 hitPosition = PlayerShip.Position;
-        PlayerShip.Respawn();
-        Sounds::PlayHurt(hitPosition, PlayerShip.Position);
-        
-        Net.HandlePlayerCollision();
-
-        Net.HandleDestroyAsteroid(Net.GetLocalPlayerId(), asteroidId);
-        
-        AsteroidBoundingBoxes[asteroidId].min = { 0.0f, 0.0f, 0.0f };
-        AsteroidBoundingBoxes[asteroidId].max = { 0.0f, 0.0f, 0.0f };
-    }
-}
-
-void World::CheckCollisions()
-{
-    NetClient& Net = GameApp::GetInstance()->GetNet();
-
-    for(int i = 0; i < Net.GetMaxAsteroids(); i++)
-    {
-        CheckShipCollisions(AsteroidBoundingBoxes[i], i);
-    }
-    
-    CheckProjectileCollisions();
-}
-
