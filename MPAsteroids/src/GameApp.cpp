@@ -1,6 +1,7 @@
 #include "include/GameApp.h"
 #include "include/Game.h"
 #include "include/Models.h"
+#include "include/Names.h"
 #include "include/Sounds.h"
 #include "include/World.h"
 #include "include/raylib/rcamera.h"
@@ -16,16 +17,6 @@ GameApp* GameApp::instance = nullptr;
 
 namespace
 {
-    const char* const kNameAdjectives[] = {
-        "Swift", "Rogue", "Lunar", "Solar", "Void", "Nova", "Astro", "Comet",
-        "Nebula", "Quasar", "Orbit", "Cosmic", "Vector", "Photon", "Ion", "Pulsar"
-    };
-
-    const char* const kNameNouns[] = {
-        "Pilot", "Hawk", "Drift", "Racer", "Falcon", "Wing", "Runner", "Ace",
-        "Scout", "Ranger", "Nomad", "Raider", "Flyer", "Dart", "Blaze", "Comet"
-    };
-
     // Without this the framebuffer keeps its initial size and the embedding page
     // stretches it, distorting the view.
     void SyncCanvasSize()
@@ -46,20 +37,6 @@ namespace
     {
         SyncCanvasSize();
         return EM_FALSE;
-    }
-
-    // Fits within MAX_PLAYER_NAME_LENGTH (16 incl. terminator).
-    std::string MakeRandomName()
-    {
-        const int adjectiveCount = sizeof(kNameAdjectives) / sizeof(kNameAdjectives[0]);
-        const int nounCount = sizeof(kNameNouns) / sizeof(kNameNouns[0]);
-
-        char buffer[MAX_PLAYER_NAME_LENGTH];
-        std::snprintf(buffer, sizeof(buffer), "%s%s%02d",
-                      kNameAdjectives[GetRandomValue(0, adjectiveCount - 1)],
-                      kNameNouns[GetRandomValue(0, nounCount - 1)],
-                      GetRandomValue(0, 99));
-        return std::string(buffer);
     }
 }
 
@@ -83,6 +60,7 @@ void GameApp::Initialize()
 
     Sounds::Init();
     Models::Init();
+    Names::Init();
 
     camera = { 0 };
     camera.position = CAMERA_OFFSET;
@@ -96,7 +74,7 @@ void GameApp::Initialize()
     SyncCanvasSize();
     emscripten_set_resize_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, nullptr, EM_FALSE, OnBrowserResize);
 
-    playerName = MakeRandomName();
+    playerName = Names::MakeRandom();
     BeginConnectAttempt();
 }
 
@@ -182,6 +160,8 @@ void GameApp::ProcessPlaying()
 {
     if (Net.GetStatus() != NetStatus::Connected)
     {
+        if (mouseCaptured) { EnableCursor(); mouseCaptured = false; }
+
         nextRetryTime = GetTime() + RETRY_DELAY_SECONDS;
         state = AppState::Connecting;
         connectStartTime = GetTime();
@@ -194,6 +174,8 @@ void GameApp::ProcessPlaying()
     float delta = GetFrameTime();
     if (delta > MAX_FRAME_DELTA) delta = MAX_FRAME_DELTA;
 
+    UpdateMouseCapture();
+
     World& world = World::Create();
     world.Update(delta);
     UpdateCamera();
@@ -205,6 +187,20 @@ void GameApp::ProcessPlaying()
         EndMode3D();
         world.DrawUI();
     EndDrawing();
+}
+
+// Browsers only hand over pointer lock from inside a real user gesture, so it is
+// requested on the click itself rather than on entering the game. Escape gives
+// the pointer back, and the next click takes it again.
+void GameApp::UpdateMouseCapture()
+{
+    // The browser is the authority here. DisableCursor() only asks for the lock,
+    // and the user can drop it with Escape at any time without raylib knowing.
+    EmscriptenPointerlockChangeEvent status = {};
+    mouseCaptured = (emscripten_get_pointerlock_status(&status) == EMSCRIPTEN_RESULT_SUCCESS) && status.isActive;
+
+    if (!mouseCaptured && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+        DisableCursor();
 }
 
 void GameApp::UpdateCamera()

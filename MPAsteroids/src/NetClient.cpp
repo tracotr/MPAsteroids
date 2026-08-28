@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <cstdio>
+#include <cmath>
 
 #include <emscripten/emscripten.h>
 #include <emscripten/websocket.h>
@@ -56,7 +57,7 @@ bool NetClient::NetConnect(const char* serverAddress, const char* playerName)
 
     LocalPlayerId = -1;
     RemoteProjectileCount = 0;
-    AsteroidAmount = 0;
+    AsteroidCount = 0;
     std::memset(Players, 0, sizeof(Players));
     std::memset(PlayerNames, 0, sizeof(PlayerNames));
     std::memset(Scoreboard, 0, sizeof(Scoreboard));
@@ -177,8 +178,10 @@ void NetClient::OnSocketClosed()
 {
     Status = NetStatus::Disconnected;
     LocalPlayerId = -1;
-    AsteroidAmount = 0;
+    AsteroidCount = 0;
     RemoteProjectileCount = 0;
+    killedPending = false;
+    killedBy = -1;
     std::memset(Players, 0, sizeof(Players));
 }
 
@@ -254,6 +257,33 @@ bool NetClient::GetPlayerSpatial(int id, Vector3* pos, Matrix* rot)
     return true;
 }
 
+// Whether a player has gone quiet. Kept separate from GetPlayerSpatial on
+// purpose: a quiet player is still drawn, they just cannot be shot. Hiding the
+// ship as well makes anyone on a stuttering connection blink in and out.
+// Keeps running while the tab is in the background, unlike the frame clock,
+// which is why this one can measure how long a packet sat in the queue.
+static double NowSeconds()
+{
+    return emscripten_get_now() * 0.001;
+}
+
+double NetClient::QueuedProjectileAge(int index) const
+{
+    if (index < 0 || index >= RemoteProjectileCount)
+        return 0.0;
+
+    double age = NowSeconds() - RemoteProjectilesQueue[index].ArrivalTime;
+    return age > 0.0 ? age : 0.0;
+}
+
+bool NetClient::IsPlayerStale(int id) const
+{
+    if (id < 0 || id >= MAX_PLAYERS || !Players[id].Active)
+        return true;
+
+    return (LastNow - Players[id].LastUpdateTime) > PLAYER_STALE_SECONDS;
+}
+
 void NetClient::HandlePlayerCollision()
 {
     ScoreboardPacket scoreboardBuffer = {};
@@ -263,35 +293,170 @@ void NetClient::HandlePlayerCollision()
     SendPacket(&scoreboardBuffer, sizeof(scoreboardBuffer));
 }
 
-void NetClient::HandleUpdateAsteroid(AsteroidInfoPacket packet)
+namespace
 {
-    for(int i = 0; i < packet.AsteroidCount && i < MAX_ASTEROIDS; i++) {
-        Asteroids[i] = packet.AllAsteroids[i];
+    // Asteroids arrive with a seed instead of a rotation, so the spin is worked
+    // out here. It comes from the seed alone, so every player sees the same rock
+    // turning the same way without any of it being sent.
+    void DeriveSpin(uint8_t seed, Vector3* axis, float* speed)
+    {
+        uint32_t hash = (uint32_t)seed * 2654435761u;
+        hash ^= hash >> 13;
+
+        float azimuth = (float)((hash >> 8) & 1023u) / 1023.0f * 2.0f * PI;
+        float height = (float)((hash >> 18) & 1023u) / 1023.0f * 2.0f - 1.0f;
+        float ring = sqrtf(fmaxf(0.0f, 1.0f - height * height));
+
+        *axis = (Vector3){ ring * cosf(azimuth), ring * sinf(azimuth), height };
+        *speed = 0.15f + (float)(hash & 255u) / 255.0f * 0.55f;
     }
-    AsteroidAmount = packet.AsteroidCount;
 }
 
-void NetClient::HandleDestroyAsteroid(int playerIdx, int asteroidIdx)
+// Merges an update into the list we already hold, in place. Asteroids we have
+// seen before keep the position we were drawing them at and how far through
+// their spin they are; ones the server no longer lists are dropped. Matched by
+// Id and never by array slot, since both sides reuse slots freely.
+void NetClient::ReportKill(int victimId)
 {
-    AsteroidDestroyPacket buffer = {};
-    buffer.Command = NetworkCommands::DestroyAsteroid;
-    buffer.PlayerID = playerIdx;
-    buffer.AsteroidID = asteroidIdx;
+    PlayerKillPacket buffer = {};
+    buffer.Command = NetworkCommands::PlayerKilled;
+    buffer.KillerId = LocalPlayerId;
+    buffer.VictimId = victimId;
 
     SendPacket(&buffer, sizeof(buffer));
 }
 
-bool NetClient::GetAsteroidSpatial(int id, Vector3* pos, Matrix* rot, float* scale)
+bool NetClient::ConsumeKilled(int* killerId)
 {
-    if(id < 0 || id >= AsteroidAmount)
-    {
+    if (!killedPending)
         return false;
+
+    if (killerId != nullptr) *killerId = killedBy;
+    killedPending = false;
+    killedBy = -1;
+    return true;
+}
+
+void NetClient::ApplyAsteroidSnapshot(const AsteroidInfoPacket& packet, int count)
+{
+    bool stillPresent[MAX_ASTEROIDS] = { false };
+
+    for (int i = 0; i < count; i++)
+    {
+        const AsteroidInfo& info = packet.Asteroids[i];
+
+        int slot = -1;
+        for (int j = 0; j < AsteroidCount; j++)
+        {
+            if (Asteroids[j].Id == info.Id)
+            {
+                slot = j;
+                break;
+            }
+        }
+
+        bool isNew = (slot == -1);
+        if (isNew)
+        {
+            if (AsteroidCount >= MAX_ASTEROIDS)
+                continue;
+
+            slot = AsteroidCount++;
+            Asteroids[slot] = ClientAsteroid{};
+            Asteroids[slot].Id = info.Id;
+            Asteroids[slot].Position = info.Position;
+            DeriveSpin(info.Seed, &Asteroids[slot].SpinAxis, &Asteroids[slot].SpinSpeed);
+            Asteroids[slot].SpinAngle = (float)(info.Seed) * 0.0245f;
+        }
+
+        ClientAsteroid& asteroid = Asteroids[slot];
+        asteroid.ServerPosition = info.Position;
+        asteroid.Velocity = info.Velocity;
+        asteroid.Scale = info.Scale;
+
+        // Too far off to be our own guess drifting: the server has moved it.
+        if (Vector3DistanceSqr(asteroid.Position, asteroid.ServerPosition) >
+            ASTEROID_SNAP_DISTANCE * ASTEROID_SNAP_DISTANCE)
+        {
+            asteroid.Position = asteroid.ServerPosition;
+        }
+
+        // The server disagreed that this one died, so stop hiding it.
+        if (asteroid.DestroyReportedAt > 0.0 && LastNow - asteroid.DestroyReportedAt >= DESTROY_REPORT_GRACE)
+            asteroid.DestroyReportedAt = -1.0;
+
+        stillPresent[slot] = true;
     }
 
-    *pos = Asteroids[id].Position;
-    *rot = Asteroids[id].Rotation;
+    // Drop everything the server no longer lists, filling each gap with the
+    // last live entry so the array stays packed.
+    for (int i = AsteroidCount - 1; i >= 0; i--)
+    {
+        if (stillPresent[i])
+            continue;
+
+        AsteroidCount--;
+        if (i != AsteroidCount)
+        {
+            Asteroids[i] = Asteroids[AsteroidCount];
+            stillPresent[i] = stillPresent[AsteroidCount];
+        }
+    }
+}
+
+void NetClient::ReportAsteroidDestroyed(uint32_t asteroidId)
+{
+    if (asteroidId == 0)
+        return;
+
+    for (int i = 0; i < AsteroidCount; i++)
+    {
+        if (Asteroids[i].Id != asteroidId)
+            continue;
+
+        // Already reported and still within the wait period, so sending it
+        // again would just be ignored by the server.
+        if (Asteroids[i].DestroyReportedAt > 0.0 && LastNow - Asteroids[i].DestroyReportedAt < DESTROY_REPORT_GRACE)
+            return;
+
+        // Hidden without waiting for the round trip, so shooting feels
+        // immediate. The grace period restores it if the server declines.
+        Asteroids[i].DestroyReportedAt = LastNow;
+        break;
+    }
+
+    AsteroidDestroyPacket buffer = {};
+    buffer.Command = NetworkCommands::DestroyAsteroid;
+    buffer.PlayerID = LocalPlayerId;
+    buffer.AsteroidId = asteroidId;
+
+    SendPacket(&buffer, sizeof(buffer));
+}
+
+uint32_t NetClient::GetAsteroidId(int index) const
+{
+    if (index < 0 || index >= AsteroidCount)
+        return 0;
+
+    return Asteroids[index].Id;
+}
+
+bool NetClient::GetAsteroidSpatial(int index, Vector3* pos, Matrix* rot, float* scale)
+{
+    if (index < 0 || index >= AsteroidCount)
+        return false;
+
+    const ClientAsteroid& asteroid = Asteroids[index];
+
+    // Reported destroyed locally and not yet confirmed: treat it as gone, so it
+    // is neither drawn nor collided with.
+    if (asteroid.DestroyReportedAt > 0.0 && LastNow - asteroid.DestroyReportedAt < DESTROY_REPORT_GRACE)
+        return false;
+
+    *pos = asteroid.Position;
+    *rot = MatrixRotate(asteroid.SpinAxis, asteroid.SpinAngle);
     if (scale != nullptr)
-        *scale = Asteroids[id].Scale;
+        *scale = asteroid.Scale;
     return true;
 }
 
@@ -302,14 +467,19 @@ void NetClient::HandleUpdateScoreboard(ScoreboardPacket packet)
         CopySafeName(PlayerNames[i], sizeof(PlayerNames[i]), packet.Names[i]);
 }
 
-// Packet type is identified by payload size; every packet struct has a distinct one.
+// Dispatched on the leading command field; see PeekCommand.
 void NetClient::DispatchPacket(const uint8_t* data, size_t length)
 {
-    if (length < 1)
+    const int command = PeekCommand(data, length);
+    if (command < 0)
         return;
 
-    if (length == sizeof(PlayerPacket))
+    if (command == NetworkCommands::AcceptPlayer || command == NetworkCommands::AddPlayer ||
+        command == NetworkCommands::RemovePlayer || command == NetworkCommands::UpdatePlayer)
     {
+        if (length != sizeof(PlayerPacket))
+            return;
+
         PlayerPacket recieved;
         memcpy(&recieved, data, sizeof(PlayerPacket));
 
@@ -354,35 +524,58 @@ void NetClient::DispatchPacket(const uint8_t* data, size_t length)
             Players[LocalPlayerId].Position = (Vector3){ 0.0f, 0.0f, 0.0f };
         }
     }
-    else if (length == sizeof(AsteroidInfoPacket))
+    else if (command == NetworkCommands::UpdateAsteroid)
     {
-        AsteroidInfoPacket recieved;
-        memcpy(&recieved, data, sizeof(AsteroidInfoPacket));
+        if (length < AsteroidPacketSize(0))
+            return;
 
-        if (recieved.Command == NetworkCommands::UpdateAsteroid)
-            HandleUpdateAsteroid(recieved);
+        int count = 0;
+        memcpy(&count, data + offsetof(AsteroidInfoPacket, AsteroidCount), sizeof(int));
+        if (count < 0 || count > MAX_ASTEROIDS || length != AsteroidPacketSize(count))
+            return;
+
+        AsteroidInfoPacket recieved;
+        memcpy(&recieved, data, AsteroidPacketSize(count));
+        ApplyAsteroidSnapshot(recieved, count);
     }
-    else if (length == sizeof(ScoreboardPacket))
+    else if (command == NetworkCommands::PlayerKilled)
     {
+        if (length != sizeof(PlayerKillPacket))
+            return;
+
+        PlayerKillPacket recieved;
+        memcpy(&recieved, data, sizeof(PlayerKillPacket));
+
+        if (recieved.VictimId == LocalPlayerId)
+        {
+            killedPending = true;
+            killedBy = recieved.KillerId;
+        }
+    }
+    else if (command == NetworkCommands::UpdateScoreboard)
+    {
+        if (length != sizeof(ScoreboardPacket))
+            return;
+
         ScoreboardPacket recieved;
         memcpy(&recieved, data, sizeof(ScoreboardPacket));
-
-        if (recieved.Command == NetworkCommands::UpdateScoreboard)
-            HandleUpdateScoreboard(recieved);
+        HandleUpdateScoreboard(recieved);
     }
-    else if (length == sizeof(ProjectilePacket))
+    else if (command == NetworkCommands::FireProjectile)
     {
+        if (length != sizeof(ProjectilePacket))
+            return;
+
         ProjectilePacket recieved;
         memcpy(&recieved, data, sizeof(ProjectilePacket));
 
-        if (recieved.Command == NetworkCommands::FireProjectile)
+        if (RemoteProjectileCount < MAX_PROJECTILES)
         {
-            if (RemoteProjectileCount < MAX_PROJECTILES)
-            {
-                RemoteProjectilesQueue[RemoteProjectileCount].Position = recieved.Position;
-                RemoteProjectilesQueue[RemoteProjectileCount].Velocity = recieved.Velocity;
-                RemoteProjectileCount++;
-            }
+            RemoteProjectilesQueue[RemoteProjectileCount].ArrivalTime = NowSeconds();
+            RemoteProjectilesQueue[RemoteProjectileCount].PlayerId = recieved.PlayerID;
+            RemoteProjectilesQueue[RemoteProjectileCount].Position = recieved.Position;
+            RemoteProjectilesQueue[RemoteProjectileCount].Velocity = recieved.Velocity;
+            RemoteProjectileCount++;
         }
     }
 }
@@ -394,26 +587,34 @@ void NetClient::NetUpdate(double now, float delta)
     if (Status != NetStatus::Connected)
         return;
 
-    // The server only broadcasts state a few times a second, so both asteroids and
-    // remote players are advanced locally between updates to keep motion smooth:
-    // asteroids extrapolate along their last known velocity, players ease toward
-    // the last position received.
-    for (int i = 0; i < AsteroidAmount; i++)
+    // The server only sends updates ten times a second, so we keep asteroids and
+    // other players moving ourselves in between. When an update arrives we slide
+    // toward it rather than snapping to it; snapping throws away the movement we
+    // just did and makes the whole field twitch every time a packet lands.
+    //
+    // The amounts below use exp() rather than "rate * delta" so they work out the
+    // same at 30fps and 240fps, and cannot overshoot on a slow frame.
+    const float asteroidBlend = 1.0f - expf(-ASTEROID_CORRECTION_RATE * delta);
+    const float playerBlend = 1.0f - expf(-PLAYER_CORRECTION_RATE * delta);
+
+    for (int i = 0; i < AsteroidCount; i++)
     {
-        Asteroids[i].Position.x += Asteroids[i].Velocity.x * delta;
-        Asteroids[i].Position.y += Asteroids[i].Velocity.y * delta;
-        Asteroids[i].Position.z += Asteroids[i].Velocity.z * delta;
+        ClientAsteroid& asteroid = Asteroids[i];
+
+        Vector3 step = Vector3Scale(asteroid.Velocity, delta);
+        asteroid.ServerPosition = Vector3Add(asteroid.ServerPosition, step);
+        asteroid.Position = Vector3Add(asteroid.Position, step);
+        asteroid.Position = Vector3Lerp(asteroid.Position, asteroid.ServerPosition, asteroidBlend);
+
+        asteroid.SpinAngle += asteroid.SpinSpeed * delta;
+        if (asteroid.SpinAngle > 2.0f * PI)
+            asteroid.SpinAngle -= 2.0f * PI;
     }
 
     for (int i = 0; i < MAX_PLAYERS; i++)
     {
         if (i != LocalPlayerId && Players[i].Active)
-        {
-            float lerpSpeed = 10.0f; // Higher = snappier, lower = floatier.
-            Players[i].Position.x += (Players[i].TargetPosition.x - Players[i].Position.x) * lerpSpeed * delta;
-            Players[i].Position.y += (Players[i].TargetPosition.y - Players[i].Position.y) * lerpSpeed * delta;
-            Players[i].Position.z += (Players[i].TargetPosition.z - Players[i].Position.z) * lerpSpeed * delta;
-        }
+            Players[i].Position = Vector3Lerp(Players[i].Position, Players[i].TargetPosition, playerBlend);
     }
 
     if(LocalPlayerId >= 0 && now - LastInputSend > UPDATE_INTERVAL)

@@ -1,4 +1,5 @@
 #include "include/Models.h"
+#include "include/GameApp.h"
 
 // WebGL1 needs GLSL ES 100 shaders; the glsl/ set is desktop GLSL 330.
 #if defined(PLATFORM_WEB)
@@ -14,6 +15,17 @@ namespace Models
     BoundingBox ShipBoxLocal;
     Model AsteroidModel;
     BoundingBox AsteroidBoxLocal;
+    float ShipRadiusLocal = 0.0f;
+    float AsteroidRadiusLocal = 0.0f;
+    float AsteroidBodyRadius = 0.0f;
+
+    // Distance from the middle of the box out to a corner, so the model still
+    // fits inside that radius whichever way it is turned.
+    static float BoxRadius(const BoundingBox& box)
+    {
+        Vector3 extents = Vector3Scale(Vector3Subtract(box.max, box.min), 0.5f);
+        return Vector3Length(extents);
+    }
 
     void Init()
     {
@@ -40,6 +52,7 @@ namespace Models
         Texture2D shipTexture = LoadTexture("resources/models/player_ship/ShipTextureDiffuse.png");
         ShipModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = shipTexture;
         ShipBoxLocal = GetModelBoundingBox(ShipModel);
+        ShipRadiusLocal = BoxRadius(ShipBoxLocal);
         GenTextureMipmaps(&shipTexture);
         SetTextureFilter(shipTexture, TEXTURE_FILTER_POINT);
 
@@ -47,6 +60,11 @@ namespace Models
         Texture2D asteroidTexture = LoadTexture("resources/models/asteroid/AsteroidTextureDiffuse.png");
         AsteroidModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = asteroidTexture;
         AsteroidBoxLocal = GetModelBoundingBox(AsteroidModel);
+        AsteroidRadiusLocal = BoxRadius(AsteroidBoxLocal);
+        {
+            Vector3 half = Vector3Scale(Vector3Subtract(AsteroidBoxLocal.max, AsteroidBoxLocal.min), 0.5f);
+            AsteroidBodyRadius = (half.x + half.y + half.z) / 3.0f;
+        }
         GenTextureMipmaps(&asteroidTexture);
         SetTextureFilter(asteroidTexture, TEXTURE_FILTER_POINT);
     }
@@ -66,8 +84,57 @@ namespace Models
         rlEnableDepthMask();
     }
     
+    // Key hints in the bottom-left corner, dim and small so they sit behind the
+    // action rather than competing with it. Kept in step with Player::Update by
+    // hand, so change both together.
+    static void DrawControlHints()
+    {
+        static const char* const hints[] = {
+            "MOUSE     pitch / yaw",
+            "CLICK     fire",
+            "W / S     thrust",
+            "A / D     yaw",
+            "R / F     pitch",
+            "Q / E     roll",
+            "SHIFT     fine turn",
+            "SPACE     fire",
+            "Y         respawn",
+        };
+        const int hintCount = sizeof(hints) / sizeof(hints[0]);
+
+        const int fontSize = 12;
+        const int lineHeight = 15;
+        const int margin = 20;
+
+        // Stacked upward from the bottom edge so the block stays put as the
+        // window is resized.
+        const int top = GetScreenHeight() - margin - lineHeight * hintCount;
+        for (int i = 0; i < hintCount; i++)
+            DrawText(hints[i], margin, top + lineHeight * i, fontSize, GRAY);
+
+        // Only worth saying while the pointer is loose, which is also the one
+        // time the player cannot steer with it.
+        if (!GameApp::GetInstance()->IsMouseCaptured())
+            DrawText("click to capture mouse", margin, top - lineHeight - 4, fontSize, LIGHTGRAY);
+    }
+
+    // Bottom-right, mirroring the control hints on the left.
+    static void DrawCoordinates(Vector3 position)
+    {
+        const int fontSize = 12;
+        const int margin = 20;
+
+        const char* readout = TextFormat("X %.0f   Y %.0f   Z %.0f", position.x, position.y, position.z);
+        int width = MeasureText(readout, fontSize);
+
+        DrawText(readout, GetScreenWidth() - margin - width, GetScreenHeight() - margin - fontSize, fontSize, GRAY);
+    }
+
     void DrawUI(Camera camera, Vector3 velocity, Vector3 position, int id, int (&scoreboard)[MAX_PLAYERS], char (&names)[MAX_PLAYERS][MAX_PLAYER_NAME_LENGTH])
     {
+        DrawControlHints();
+        DrawCoordinates(position);
+
         // Rank only occupied slots; MAX_PLAYERS is far larger than a typical session.
         int ranked[MAX_PLAYERS];
         int rankedCount = 0;
@@ -89,7 +156,9 @@ namespace Models
             ranked[j + 1] = current;
         }
 
-        const int panelX = GetScreenWidth() - 180;
+        // Rows are drawn left-to-right from here, so a left anchor keeps long
+        // names on screen.
+        const int panelX = 20;
         DrawText(TextFormat("Leaderboard (%i)", rankedCount), panelX, 20, 20, RAYWHITE);
 
         int visibleRows = rankedCount < LEADERBOARD_VISIBLE_ROWS ? rankedCount : LEADERBOARD_VISIBLE_ROWS;

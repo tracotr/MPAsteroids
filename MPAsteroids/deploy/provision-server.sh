@@ -26,7 +26,11 @@ fi
 
 echo "==> Building the dedicated server (headless, no graphics deps)"
 cd "$REPO_DIR"
-make server
+
+# SERVER_PORT is the port the game server binds, and has to match the
+# reverse_proxy line in deploy/Caddyfile. The Makefile default is the public
+# HTTPS port, which Caddy needs for itself, so it is overridden here.
+make server SERVER_PORT=25665
 
 echo "==> Opening ports 80/443 in the OS firewall"
 for PORT in 80 443; do

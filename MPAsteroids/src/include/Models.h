@@ -15,6 +15,17 @@ namespace Models
     extern BoundingBox ShipBoxLocal;
     extern Model AsteroidModel;
     extern BoundingBox AsteroidBoxLocal;
+
+    // How far each model reaches from its centre, worked out once at load.
+    // Collision uses these for a quick distance check before the full box test.
+    extern float ShipRadiusLocal;
+    extern float AsteroidRadiusLocal;
+
+    // Average half-extent rather than the corner distance. A rock is treated as
+    // a ball when it hits a ship, and the corner distance would make that ball
+    // much fatter than the model actually looks.
+    extern float AsteroidBodyRadius;
+
     
     void Init();
 

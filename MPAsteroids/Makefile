@@ -93,6 +93,7 @@ WEB_SOURCE_FILES = \
     src/main.cpp \
     src/GameApp.cpp \
     src/Models.cpp \
+    src/Names.cpp \
     src/Player.cpp \
     src/Sounds.cpp \
     src/World.cpp \

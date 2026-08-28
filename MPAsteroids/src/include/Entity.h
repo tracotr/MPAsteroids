@@ -9,9 +9,9 @@ public:
     bool Alive = false;
 
     float BaseSpeed = 0.5f;
-    float MaxSpeed = 60.0f;
-    float RotationSpeed = 0.04f;
-    float slowRotationSpeed = 0.01f;
+    float MaxSpeed = 70.0f;
+    float RotationSpeed = 0.025f;
+    float SlowRotationSpeed = 0.01f;
 
     Vector3 Position = { 0.0f, 0.0f, 0.0f };
     Matrix Rotation = MatrixIdentity();
