@@ -4,3 +4,8 @@
 *.dsym
 build/
 main
+
+# The rule above is for compiler object files, but Wavefront models share the
+# extension. Without this the 3D models are silently left out of the repo, and
+# anything building from a fresh clone renders nothing.
+!resources/models/**/*.obj
