@@ -17,7 +17,6 @@ namespace Models
 
     void Init()
     {
-        // Load skybox
         Mesh skyboxCube = GenMeshCube(1.0f, 1.0f, 1.0f);
         Skybox = LoadModelFromMesh(skyboxCube);
         Skybox.materials[0].shader = LoadShader(SHADER_DIR "/skybox.vs", SHADER_DIR "/skybox.fs");
@@ -34,10 +33,9 @@ namespace Models
         SetShaderValue(shdrCubemap, GetShaderLocation(shdrCubemap, "equirectangularMap"), &equirectangularOff, SHADER_UNIFORM_INT);
 
         Image img = LoadImage("resources/skybox/StarrySky.png");
-        Skybox.materials[0].maps[MATERIAL_MAP_CUBEMAP].texture = LoadTextureCubemap(img, CUBEMAP_LAYOUT_AUTO_DETECT);    // CUBEMAP_LAYOUT_PANORAMA
+        Skybox.materials[0].maps[MATERIAL_MAP_CUBEMAP].texture = LoadTextureCubemap(img, CUBEMAP_LAYOUT_AUTO_DETECT);
         UnloadImage(img);
 
-        // Load player ship model & texture
         ShipModel = LoadModel("resources/models/player_ship/spaceship.obj");
         Texture2D shipTexture = LoadTexture("resources/models/player_ship/ShipTextureDiffuse.png");
         ShipModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = shipTexture;
@@ -45,7 +43,6 @@ namespace Models
         GenTextureMipmaps(&shipTexture);
         SetTextureFilter(shipTexture, TEXTURE_FILTER_POINT);
 
-        // Load asteroid model & texture
         AsteroidModel = LoadModel("resources/models/asteroid/asteroid.obj");
         Texture2D asteroidTexture = LoadTexture("resources/models/asteroid/AsteroidTextureDiffuse.png");
         AsteroidModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = asteroidTexture;
@@ -56,14 +53,12 @@ namespace Models
 
     void DrawModel(Model model, const Vector3& position, const Matrix& rotation, float scale)
     {
-        // Rotate model off pitch, yaw, and roll
         model.transform = rotation;
         DrawModel(model, position, scale, WHITE);
     }
 
     void DrawSkybox()
     {
-        // flip box and draw skybox
         rlDisableBackfaceCulling();
         rlDisableDepthMask();
             DrawModel(Models::Skybox, (Vector3){ 0.0f, 0.0f, 0.0f }, 1.0f, WHITE);
@@ -73,8 +68,7 @@ namespace Models
     
     void DrawUI(Camera camera, Vector3 velocity, Vector3 position, int id, int (&scoreboard)[MAX_PLAYERS], char (&names)[MAX_PLAYERS][MAX_PLAYER_NAME_LENGTH])
     {
-        // Rank only the players actually in the session; with MAX_PLAYERS scaled
-        // up for a public server, listing every empty slot would fill the screen.
+        // Rank only occupied slots; MAX_PLAYERS is far larger than a typical session.
         int ranked[MAX_PLAYERS];
         int rankedCount = 0;
         for (int i = 0; i < MAX_PLAYERS; i++)
@@ -126,7 +120,6 @@ namespace Models
         }
     }
 
-
     BoundingBox GetWorldBoundingBox(BoundingBox localBox, Vector3 position, Matrix rotation)
     {
         Vector3 corners[8] = {
@@ -146,7 +139,6 @@ namespace Models
 
         for (int i = 0; i < 8; i++)
         {
-            // Apply rotation then translate to position
             Vector3 worldCorner = Vector3Transform(corners[i], rotation);
             worldCorner = Vector3Add(worldCorner, position);
 

@@ -224,7 +224,6 @@ void World::DrawPlayerModels()
 {   
     NetClient& Net = GameApp::GetInstance()->GetNet();
 
-    // draw other player models
     for (int i = 0; i < MAX_PLAYERS; i++)
     {
         Vector3 pos = { 0.0f, 0.0f, 0.0f };
@@ -242,7 +241,6 @@ void World::DrawAsteroidModels()
 {
     NetClient& Net = GameApp::GetInstance()->GetNet();
 
-    // Draw asteroid models
     for(int i = 0; i < Net.GetMaxAsteroids(); i++)
     {
         Vector3 pos = { 0.0f, 0.0f, 0.0f };
@@ -261,7 +259,6 @@ void World::CreateAsteroidCollision()
 
     for(int i = 0; i < Net.GetMaxAsteroids(); i++)
     {
-        // calculating bounding boxes
         Vector3 pos = { 0.0f, 0.0f, 0.0f };
         Matrix rot = MatrixIdentity();
         float scale = 1.0f;
@@ -282,7 +279,6 @@ void World::CheckShipCollisions(BoundingBox asteroidBox, int asteroidId)
 
     BoundingBox PlayerBox = Models::GetWorldBoundingBox(Models::ShipBoxLocal, PlayerShip.Position, PlayerShip.Rotation);
 
-    // check player-asteroid collisions
     if(CheckCollisionBoxes(PlayerBox, asteroidBox))
     {
         Vector3 hitPosition = PlayerShip.Position;

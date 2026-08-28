@@ -2,12 +2,11 @@
 
 precision mediump float;
 
-// Input vertex attributes (from vertex shader)
 varying vec3 fragPosition;
 
-// Input uniform values
 uniform sampler2D equirectangularMap;
 
+// Maps a direction vector onto equirectangular texture coordinates.
 vec2 SampleSphericalMap(vec3 v)
 {
     vec2 uv = vec2(atan(v.z, v.x), asin(v.y));
@@ -18,12 +17,6 @@ vec2 SampleSphericalMap(vec3 v)
 
 void main()
 {
-    // Normalize local position
     vec2 uv = SampleSphericalMap(normalize(fragPosition));
-
-    // Fetch color from texture map
-    vec3 color = texture2D(equirectangularMap, uv).rgb;
-
-    // Calculate final fragment color
-    gl_FragColor = vec4(color, 1.0);
+    gl_FragColor = vec4(texture2D(equirectangularMap, uv).rgb, 1.0);
 }

@@ -35,10 +35,8 @@
 
 namespace
 {
-    // ---- SHA1 (public-domain algorithm, written for this file) ----
-    // Only used to derive the WebSocket handshake's Sec-WebSocket-Accept
-    // value per RFC 6455 - not a security primitive, so a plain from-spec
-    // implementation is appropriate here.
+    // SHA1 is required only to derive the handshake's Sec-WebSocket-Accept value
+    // (RFC 6455). It is not used as a security primitive here.
     struct Sha1Digest { uint8_t bytes[20]; };
 
     uint32_t RotateLeft(uint32_t value, int bits) { return (value << bits) | (value >> (32 - bits)); }
@@ -263,9 +261,8 @@ void WebSocketServer::Disconnect(ConnId id)
 
 namespace
 {
-    // Tries to parse and consume one WebSocket frame from the front of
-    // recvBuf. Returns true if a frame (possibly a control frame handled
-    // internally) was consumed; sets outMessage/outClosed accordingly.
+    // Consumes one frame from the front of recvBuf, returning false when the
+    // buffer holds only a partial frame. Control frames are handled internally.
     bool TryParseFrame(std::vector<uint8_t>& recvBuf, std::vector<uint8_t>& sendBuf, std::vector<uint8_t>& outMessage, bool& gotMessage, bool& shouldClose)
     {
         gotMessage = false;
@@ -311,8 +308,8 @@ namespace
 
         if (!fin)
         {
-            // Fragmented frames aren't supported - our protocol only ever
-            // sends small, single-frame binary messages. Treat as fatal.
+            // The game protocol only sends small single-frame messages, so a
+            // fragmented frame means something is wrong. Drop the connection.
             shouldClose = true;
         }
         else if (opcode == 0x2 || opcode == 0x1) // binary or text
@@ -367,7 +364,6 @@ void WebSocketServer::Poll(int timeoutMs, const OnConnect& onConnect, const OnMe
     int ready = select((int)maxFd + 1, &readSet, &writeSet, nullptr, &tv);
     if (ready < 0) return;
 
-    // Accept new connections
     if (FD_ISSET(listenSock, &readSet))
     {
         for (;;)
@@ -473,7 +469,7 @@ void WebSocketServer::Poll(int timeoutMs, const OnConnect& onConnect, const OnMe
         }
     }
 
-    // Reap closed connections, notifying anyone who got a connect callback.
+    // Only report a disconnect to callers that were told about the connect.
     for (size_t i = 0; i < connections.size();)
     {
         Connection* conn = connections[i];

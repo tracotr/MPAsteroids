@@ -1,12 +1,11 @@
 #pragma once
 
-// Minimal RFC 6455 WebSocket server (binary messages only, no TLS, no
-// extensions). TLS is intentionally out of scope here: the dedicated server
-// is meant to run behind a reverse proxy (nginx/Caddy) that terminates
-// wss:// and forwards plain ws:// traffic to this server locally.
+// Minimal RFC 6455 WebSocket server: binary messages, no extensions, no TLS.
+// TLS is deliberately absent because the server runs behind a reverse proxy
+// that terminates wss:// and forwards plain ws:// over localhost.
 //
-// Single-threaded, select()-based, sized for dozens of concurrent
-// connections (a game lobby), not internet-facing high-concurrency loads.
+// Single-threaded and select()-based, sized for a game lobby of dozens of
+// connections rather than high-concurrency public traffic.
 
 #include <cstdint>
 #include <cstddef>
@@ -29,12 +28,11 @@ public:
     void Stop();
     bool IsRunning() const { return listenSocket != InvalidSocketValue(); }
 
-    // Non-blocking: services accepts, handshakes, reads and writes for up to
-    // timeoutMs, invoking the given callbacks synchronously for whatever
-    // happened during this call. Safe to call every server tick.
+    // Services accepts, handshakes, reads and writes, blocking at most timeoutMs
+    // and invoking the callbacks synchronously before it returns.
     void Poll(int timeoutMs, const OnConnect& onConnect, const OnMessage& onMessage, const OnDisconnect& onDisconnect);
 
-    // Queues a binary message to a connection; flushed on the next Poll().
+    // Queued, not sent immediately; the next Poll() flushes it.
     void Send(ConnId id, const void* data, size_t len);
     void Disconnect(ConnId id);
 

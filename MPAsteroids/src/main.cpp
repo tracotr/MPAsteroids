@@ -17,7 +17,7 @@ int main()
     app.Initialize();
 
     // The browser owns the frame loop; a blocking while() would freeze the tab.
-    // Passing fps=0 defers to requestAnimationFrame for vsync-matched pacing.
+    // fps=0 defers to requestAnimationFrame, which paces to the display refresh.
     emscripten_set_main_loop(MainLoopTick, 0, 1);
 
     app.Shutdown();

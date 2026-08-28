@@ -1,24 +1,23 @@
-#**************************************************************************************************
-#
 #   MPAsteroids makefile
 #
-#   Two build targets:
-#     > make web     (default) - Emscripten/WebAssembly client, output: mpasteroids.html/.js/.wasm/.data
-#     > make server            - native headless dedicated server, output: mpasteroids-server
+#     make web     (default) - WebAssembly client -> mpasteroids.html/.js/.wasm/.data
+#     make server            - headless dedicated server -> mpasteroids-server
 #
-#   The client is browser-only; the server is meant to run on a Linux host behind a
-#   reverse proxy (nginx/Caddy) that terminates TLS and forwards wss:// -> ws://.
-#
-#**************************************************************************************************
+#   The client is browser-only. The server runs on a Linux host behind a reverse
+#   proxy that terminates TLS and forwards wss:// to its local ws:// port.
 
 .PHONY: all web server clean
 
-# Where the built web client connects. For a proxied production deploy:
+# Production deploys override these:
 #   make SERVER_HOST=asteroids.example.com SERVER_PUBLIC_PORT=443 SERVER_PATH=/ws
+#
+# Overriding SERVER_PATH on the command line from Git Bash/MSYS needs
+# MSYS_NO_PATHCONV=1, otherwise the leading slash is rewritten to a Windows path
+# and the client builds an unusable URL. Editing the default below is unaffected.
 SERVER_HOST           ?= asteroids.jaxon-king.com
-# Port the server binds locally (kept private behind a reverse proxy).
+# Port the server binds. Behind a proxy this is local-only, not the public port.
 SERVER_PORT           ?= 443
-# Port the browser dials, and the path it requests.
+# Port and path the browser dials.
 SERVER_PUBLIC_PORT    ?= $(SERVER_PORT)
 SERVER_PATH           ?= /ws
 
@@ -28,7 +27,6 @@ SERVER_NAME           ?= mpasteroids-server
 RAYLIB_PATH           ?= C:/raylib
 BUILD_MODE            ?= RELEASE
 
-# PLATFORM_WEB: Default properties
 BUILD_WEB_SHELL       ?= shell.html
 BUILD_WEB_HEAP_SIZE   ?= 134217728
 BUILD_WEB_RESOURCES   ?= TRUE
@@ -41,8 +39,8 @@ ifeq ($(OS),Windows_NT)
     CLANG_PATH          = $(EMSDK_PATH)/upstream/bin
     PYTHON_PATH         = $(EMSDK_PATH)/python/3.13.3_64bit
     NODE_PATH           = $(EMSDK_PATH)/node/22.16.0_64bit/bin
-    # Scoped to the web target only - exporting this globally would shadow the
-    # native toolchain and break `make server`.
+    # Applied to the web target only. Exporting it globally shadows the native
+    # toolchain and breaks `make server`.
     EMSDK_PATH_PREFIX   = $(EMSDK_PATH);$(EMSCRIPTEN_PATH);$(CLANG_PATH);$(NODE_PATH);$(PYTHON_PATH);
 else
     UNAMEOS = $(shell uname)
@@ -71,9 +69,8 @@ endif
 
 INCLUDE_PATHS = -I. -Isrc/include -Isrc/include/raylib -Isrc/include/networking -I$(RAYLIB_PATH)/src -I$(RAYLIB_PATH)/src/external $(EXTRA_INCLUDE_PATHS)
 
-# NOTE: No -sASYNCIFY. The game drives itself from emscripten_set_main_loop and
-# the WebSocket API is callback-driven, so nothing blocks and Asyncify's
-# stack-unwinding overhead is pure cost.
+# No -sASYNCIFY: the main loop and the WebSocket API are both callback-driven, so
+# nothing blocks and Asyncify's stack-unwinding overhead would be pure cost.
 LDFLAGS = -L. -sTOTAL_MEMORY=$(BUILD_WEB_HEAP_SIZE) -sFORCE_FILESYSTEM=1 \
           -sEXPORTED_RUNTIME_METHODS=ccall,stringToUTF8 -sMINIFY_HTML=0 -sUSE_GLFW=3 \
           -sALLOW_MEMORY_GROWTH=1 -lwebsocket.js

@@ -71,14 +71,10 @@ bool NetClient::NetConnect(const char* serverAddress, const char* playerName)
         return false;
     }
 
-    // Use wss:// when the page itself was served over HTTPS, since browsers
-    // block insecure ws:// connections from a secure page.
+    // Browsers block ws:// from an https:// page, so follow the page's scheme.
     const bool pageIsSecure = EM_ASM_INT({ return location.protocol === 'https:' ? 1 : 0; }) != 0;
     const char* scheme = pageIsSecure ? "wss" : "ws";
     const int port = SERVER_PUBLIC_PORT;
-
-    // Omit the port when it's already the scheme's default, so a proxied
-    // deployment produces a plain "wss://host/path" URL.
     const bool portIsDefault = (pageIsSecure && port == 443) || (!pageIsSecure && port == 80);
 
     char url[256];
@@ -87,16 +83,12 @@ bool NetClient::NetConnect(const char* serverAddress, const char* playerName)
     else
         std::snprintf(url, sizeof(url), "%s://%s:%d%s", scheme, serverAddress, port, SERVER_PATH);
 
-    // The compile-time address above is the default, not the last word: the page
-    // can point this build at a different server without a rebuild. Useful when
-    // the server lives behind a tunnel whose hostname changes.
-    //   ?server=example.com          -> wss://example.com/<SERVER_PATH>
-    //   ?server=example.com:9000     -> wss://example.com:9000/<SERVER_PATH>
-    //   ?server=ws://host:9000/path  -> used verbatim
-    // or set window.MPASTEROIDS_SERVER in the page before the module loads.
+    // The compile-time address is only a default. The page can retarget this build
+    // without a rebuild, which matters when the server sits behind a tunnel whose
+    // hostname changes. Accepts a bare host, host:port, or a full URL.
     char serverOverride[256] = { 0 };
-    // NOTE: no top-level commas inside EM_ASM - the preprocessor would split
-    // them into extra macro arguments. Commas inside parentheses are fine.
+
+    // EM_ASM splits its body on top-level commas, so declare each var separately.
     EM_ASM({
         var out = $0;
         var max = $1;
@@ -112,9 +104,9 @@ bool NetClient::NetConnect(const char* serverAddress, const char* playerName)
     if (serverOverride[0] != '\0')
     {
         if (std::strstr(serverOverride, "://") != nullptr)
-            std::snprintf(url, sizeof(url), "%s", serverOverride);       // full URL, used as-is
+            std::snprintf(url, sizeof(url), "%s", serverOverride);
         else if (std::strchr(serverOverride, '/') != nullptr)
-            std::snprintf(url, sizeof(url), "%s://%s", scheme, serverOverride);  // host + path
+            std::snprintf(url, sizeof(url), "%s://%s", scheme, serverOverride);
         else
             std::snprintf(url, sizeof(url), "%s://%s%s", scheme, serverOverride, SERVER_PATH);
 
@@ -195,17 +187,13 @@ void NetClient::OnSocketMessage(const uint8_t* data, size_t length)
     DispatchPacket(data, length);
 }
 
-// A new remote player was added to our local simulation
 void NetClient::HandleAddPlayer(PlayerPacket packet)
 {
-	// find out who the server is talking about
 	int remotePlayer = packet.Id;
 
-    // skip if out of bounds, or local player
 	if(remotePlayer < 0 || remotePlayer >= MAX_PLAYERS || remotePlayer == LocalPlayerId)
 		return;
 
-	// set them as active and update the location
 	Players[remotePlayer].Active = true;
     CopySafeName(Players[remotePlayer].Name, sizeof(Players[remotePlayer].Name), packet.Name);
     CopySafeName(PlayerNames[remotePlayer], sizeof(PlayerNames[remotePlayer]), packet.Name);
@@ -216,33 +204,25 @@ void NetClient::HandleAddPlayer(PlayerPacket packet)
 	Players[remotePlayer].LastUpdateTime = LastNow;
 }
 
-// A remote player has left the game and needs to be removed from the local simulation
 void NetClient::HandleRemovePlayer(PlayerPacket packet)
 {
-	// find out who the server is talking about
 	int remotePlayer = packet.Id;
 
-    // skip if out of bounds, or local player
 	if(remotePlayer < 0 || remotePlayer >= MAX_PLAYERS || remotePlayer == LocalPlayerId)
 		return;
 
-	// remove the player from the simulation. No other data is needed except the player id
 	Players[remotePlayer].Active = false;
     Players[remotePlayer].Name[0] = '\0';
     PlayerNames[remotePlayer][0] = '\0';
 }
 
-// The server has a new position for a player in our local simulation
 void NetClient::HandleUpdatePlayer(PlayerPacket packet)
 {
-	// find out who the server is talking about
 	int remotePlayer = packet.Id;
 
-    // skip if out of bounds, local player, or not active
 	if(remotePlayer < 0 || remotePlayer >= MAX_PLAYERS || remotePlayer == LocalPlayerId || !Players[remotePlayer].Active)
 		return;
 
-	// update the last known position and movement
     CopySafeName(Players[remotePlayer].Name, sizeof(Players[remotePlayer].Name), packet.Name);
     CopySafeName(PlayerNames[remotePlayer], sizeof(PlayerNames[remotePlayer]), packet.Name);
 
@@ -253,28 +233,24 @@ void NetClient::HandleUpdatePlayer(PlayerPacket packet)
 
 void NetClient::UpdateLocalPlayer(Vector3 pos, Matrix rot)
 {
-    // if we are not accepted, we can't update
+    // The server hasn't assigned us a slot yet.
 	if(LocalPlayerId < 0)
         return;
 
-    // Update local player
     Players[LocalPlayerId].Position = pos;
     Players[LocalPlayerId].Rotation = rot;
 }
 
 bool NetClient::GetPlayerSpatial(int id, Vector3* pos, Matrix* rot)
 {
-    // make sure the player is valid and active, or disregard our player id
+    // Callers draw the result, and the local ship is drawn separately.
     if (id < 0 || id >= MAX_PLAYERS || !Players[id].Active || id == LocalPlayerId)
     {
         return false;
     }
 
-    // copy the location of our networked friend
     *pos = Players[id].Position;
     *rot = Players[id].Rotation;
-
-    // return true because they exist
     return true;
 }
 
@@ -307,7 +283,6 @@ void NetClient::HandleDestroyAsteroid(int playerIdx, int asteroidIdx)
 
 bool NetClient::GetAsteroidSpatial(int id, Vector3* pos, Matrix* rot, float* scale)
 {
-    // skip if out of bounds
     if(id < 0 || id >= AsteroidAmount)
     {
         return false;
@@ -322,12 +297,12 @@ bool NetClient::GetAsteroidSpatial(int id, Vector3* pos, Matrix* rot, float* sca
 
 void NetClient::HandleUpdateScoreboard(ScoreboardPacket packet)
 {
-    // copy argument into our scoreboard
     memcpy(Scoreboard, packet.Scoreboard, sizeof(packet.Scoreboard));
     for (int i = 0; i < MAX_PLAYERS; ++i)
         CopySafeName(PlayerNames[i], sizeof(PlayerNames[i]), packet.Names[i]);
 }
 
+// Packet type is identified by payload size; every packet struct has a distinct one.
 void NetClient::DispatchPacket(const uint8_t* data, size_t length)
 {
     if (length < 1)
@@ -338,7 +313,7 @@ void NetClient::DispatchPacket(const uint8_t* data, size_t length)
         PlayerPacket recieved;
         memcpy(&recieved, data, sizeof(PlayerPacket));
 
-        // If we have an id in the server, do what the server wants us to do
+        // Until the server assigns us an id, AcceptPlayer is the only packet we act on.
         if (LocalPlayerId != -1)
         {
             switch (recieved.Command)
@@ -356,13 +331,11 @@ void NetClient::DispatchPacket(const uint8_t* data, size_t length)
                     break;
             }
         }
-        // We do not have an ID in the server, so we need to read the accept command
         else
         {
             if (recieved.Command != NetworkCommands::AcceptPlayer)
                 return;
 
-            // Read id from command, check if in bounds, and prepare it to be in the game.
             if (recieved.Id < 0 || recieved.Id >= MAX_PLAYERS)
                 return;
 
@@ -421,6 +394,10 @@ void NetClient::NetUpdate(double now, float delta)
     if (Status != NetStatus::Connected)
         return;
 
+    // The server only broadcasts state a few times a second, so both asteroids and
+    // remote players are advanced locally between updates to keep motion smooth:
+    // asteroids extrapolate along their last known velocity, players ease toward
+    // the last position received.
     for (int i = 0; i < AsteroidAmount; i++)
     {
         Asteroids[i].Position.x += Asteroids[i].Velocity.x * delta;
@@ -432,14 +409,13 @@ void NetClient::NetUpdate(double now, float delta)
     {
         if (i != LocalPlayerId && Players[i].Active)
         {
-            float lerpSpeed = 10.0f; // Higher = snappier, Lower = floatier
+            float lerpSpeed = 10.0f; // Higher = snappier, lower = floatier.
             Players[i].Position.x += (Players[i].TargetPosition.x - Players[i].Position.x) * lerpSpeed * delta;
             Players[i].Position.y += (Players[i].TargetPosition.y - Players[i].Position.y) * lerpSpeed * delta;
             Players[i].Position.z += (Players[i].TargetPosition.z - Players[i].Position.z) * lerpSpeed * delta;
         }
     }
 
-    // if we're in a server send packet to server
     if(LocalPlayerId >= 0 && now - LastInputSend > UPDATE_INTERVAL)
     {
         PlayerPacket buffer = {};

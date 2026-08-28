@@ -26,8 +26,8 @@ namespace
         "Scout", "Ranger", "Nomad", "Raider", "Flyer", "Dart", "Blaze", "Comet"
     };
 
-    // Match the render resolution to the canvas's actual displayed size so the
-    // view isn't stretched when the embedding page sizes the canvas.
+    // Without this the framebuffer keeps its initial size and the embedding page
+    // stretches it, distorting the view.
     void SyncCanvasSize()
     {
         double cssWidth = 0.0, cssHeight = 0.0;
@@ -188,9 +188,9 @@ void GameApp::ProcessPlaying()
         return;
     }
 
-    // A backgrounded tab starves requestAnimationFrame, so the first frame back
-    // can carry a multi-second delta that would teleport the ship and its
-    // projectiles across the map. Cap it to a sane step.
+    // A backgrounded tab stops receiving frames, so the first frame after it
+    // regains focus carries a delta of however long it was hidden. Uncapped,
+    // that teleports the ship and its projectiles across the map.
     float delta = GetFrameTime();
     if (delta > MAX_FRAME_DELTA) delta = MAX_FRAME_DELTA;
 

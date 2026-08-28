@@ -10,6 +10,8 @@ asteroids.jaxon-king.com {
 	}
 	handle {
 		root * /var/www/mpasteroids
-		file_server
+		file_server {
+			index mpasteroids.html
+		}
 	}
 }

@@ -1,19 +1,12 @@
 #!/usr/bin/env bash
-# Provisions an Ubuntu VM (e.g. Oracle Cloud Always Free) to host the
-# MPAsteroids dedicated server + web client behind Caddy (automatic HTTPS).
-#
-# Usage, on the VM:
+
+# Usage to host (ubuntu)
 #   sudo apt update && sudo apt install -y git
 #   git clone https://github.com/tracotr/MPAsteroids.git
 #   cd MPAsteroids/MPAsteroids/deploy
 #   chmod +x provision-server.sh
 #   sudo ./provision-server.sh
-#
-# Before running: point your subdomain's DNS A record at this VM's public
-# IP, and open TCP 80 + 443 in the Oracle Cloud console's Security
-# List/Network Security Group for this VM (the OS firewall is handled
-# below, but Oracle also filters at the cloud network level separately).
-
+#   open TCP 80 + 443 
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -36,9 +29,6 @@ cd "$REPO_DIR"
 make server
 
 echo "==> Opening ports 80/443 in the OS firewall"
-# Oracle's stock Ubuntu images use iptables (not ufw) with a REJECT rule at
-# the end of INPUT. Inserting at the top guarantees these ACCEPT rules are
-# evaluated before it, regardless of what else is in the chain.
 for PORT in 80 443; do
     if ! iptables -C INPUT -p tcp --dport "$PORT" -j ACCEPT 2>/dev/null; then
         iptables -I INPUT -p tcp --dport "$PORT" -j ACCEPT
@@ -72,21 +62,3 @@ chown -R "$SERVICE_USER":"$SERVICE_USER" /var/www/mpasteroids
 chmod -R o+rX /var/www/mpasteroids
 cp "$REPO_DIR/deploy/Caddyfile" /etc/caddy/Caddyfile
 systemctl reload caddy 2>/dev/null || systemctl restart caddy
-
-cat <<DONE
-
-==> Done. Remaining steps:
-  1. DNS: point an A record for asteroids.jaxon-king.com at this VM's public IP.
-  2. Oracle Cloud console: open ingress TCP 80 and 443 (source 0.0.0.0/0) on
-     this VM's Security List / Network Security Group.
-  3. On your dev machine, rebuild the web client pointed at this domain:
-       make SERVER_HOST=asteroids.jaxon-king.com SERVER_PUBLIC_PORT=443 SERVER_PATH=/ws
-     then copy the 4 output files here:
-       scp mpasteroids.html mpasteroids.js mpasteroids.wasm mpasteroids.data \\
-           $SERVICE_USER@<this-vm-ip>:/var/www/mpasteroids/
-  4. Visit https://asteroids.jaxon-king.com - Caddy issues the HTTPS cert
-     automatically on first request once DNS + firewall are in place.
-
-Check the server logs anytime with: sudo systemctl status mpasteroids
-                                     sudo journalctl -u mpasteroids -f
-DONE

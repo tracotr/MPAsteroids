@@ -12,33 +12,27 @@
 #define SCREEN_WIDTH 1280
 #define SCREEN_HEIGHT 720
 
-// Port the dedicated server binds locally. Behind a reverse proxy this stays
-// private to the host; the browser never dials it directly.
+// Port the server binds. Behind a reverse proxy this stays private to the host.
 #ifndef SERVER_PORT
 #define SERVER_PORT 25665
 #endif
 
-// Host the web client auto-connects to. Override at build time:
-//   make SERVER_HOST=game.example.com
 #ifndef SERVER_HOST
 #define SERVER_HOST "127.0.0.1"
 #endif
 
-// Port the browser dials. Behind a reverse proxy this is the public HTTPS port
-// (443), which is NOT the same as the port the server binds - the proxy
-// forwards 443 -> SERVER_PORT. Defaults to SERVER_PORT for direct local testing.
+// Port the browser dials, which behind a proxy is the public HTTPS port rather
+// than SERVER_PORT: the proxy accepts 443 and forwards to the server's local port.
 #ifndef SERVER_PUBLIC_PORT
 #define SERVER_PUBLIC_PORT SERVER_PORT
 #endif
 
-// URL path the WebSocket lives at. A reverse proxy typically routes a path such
-// as "/ws" to the game server so the site and the game share one domain/port.
+// URL path the proxy routes to the server, letting the site and game share a domain.
 #ifndef SERVER_PATH
 #define SERVER_PATH "/"
 #endif
 
-// Leaderboard rows shown on screen at once (players beyond this are still
-// tracked/scored, just not all displayed with MAX_PLAYERS scaled up).
+// Players past this are still scored, just not all listed at once.
 #define LEADERBOARD_VISIBLE_ROWS 8
 
 enum NetworkCommands

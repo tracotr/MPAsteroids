@@ -37,12 +37,10 @@ private:
     char PlayerNames[MAX_PLAYERS][MAX_PLAYER_NAME_LENGTH] = { 0 };
     int Scoreboard[MAX_PLAYERS] = { 0 };
 
-    // last time we updated
     double LastNow = 0;
-    // how long in seconds since the last time we sent an update
     double LastInputSend = -100;
 
-    // how long to wait between updates (20 update ticks a second)
+    // Outbound input rate: 20 sends a second, independent of framerate.
     const double UPDATE_INTERVAL = 1.0f / 20.0f;
 
     AsteroidInfo Asteroids[MAX_ASTEROIDS];
