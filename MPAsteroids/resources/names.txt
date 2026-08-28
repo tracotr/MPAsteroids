@@ -1,0 +1,61 @@
+# Random player names, built as <adjective><noun><00-99>.
+#
+# One word per line. Blank lines and lines starting with # are ignored, and the
+# two [section] headers below decide which list a word goes into.
+#
+# Names are capped at 31 characters, which fits any pairing of the words below.
+# If you add longer ones and a combination runs over, the words are trimmed and
+# the two digits are kept, since the digits are what tell apart two players who
+# drew the same pair. The game logs a warning at startup if that can happen, so
+# watch the console after editing this file.
+
+[adjectives]
+Silly
+Swaggy
+Flimsy
+Dorky
+Feasible
+Unfunny
+Long
+Jamming
+Grooving
+Manipulating
+Insane
+Unbeatable
+Rushing
+Dashing
+Questionable
+Green
+Blue
+Red
+Wayning
+HAte
+Magnificient
+Tiny
+Skinny
+
+[nouns]
+Otter
+Cheese
+Ferret
+Instigator
+Porkchop
+Goat
+Sherman
+Booger
+Jeff
+Lee
+Donut
+Gerrymanderer
+Pilot
+Teacher
+whatthe-
+Frisk
+Steve
+Misterbob
+Cactus
+Strawberry
+Twig
+Yorkshilre
+Bullet
+Deer
