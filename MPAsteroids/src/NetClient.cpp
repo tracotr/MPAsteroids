@@ -257,12 +257,11 @@ bool NetClient::GetPlayerSpatial(int id, Vector3* pos, Matrix* rot)
     return true;
 }
 
-// Whether a player has gone quiet. Deliberately not folded into GetPlayerSpatial:
-// hiding a ship for this makes anyone on a throttled or briefly stuttering
-// connection blink in and out. They stay drawn, they just cannot be shot, which
-// is the only part that ever mattered.
-// A clock that keeps running while the tab is in the background, unlike the
-// frame time, which is what makes it usable for measuring queue delay.
+// Whether a player has gone quiet. Kept separate from GetPlayerSpatial on
+// purpose: a quiet player is still drawn, they just cannot be shot. Hiding the
+// ship as well makes anyone on a stuttering connection blink in and out.
+// Keeps running while the tab is in the background, unlike the frame clock,
+// which is why this one can measure how long a packet sat in the queue.
 static double NowSeconds()
 {
     return emscripten_get_now() * 0.001;

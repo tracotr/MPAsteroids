@@ -22,9 +22,8 @@ void Player::Update(double delta)
     laserCooldown += delta;
     laserCooldown = Clamp(laserCooldown, 0.0, LASER_COOLDOWN_DURATION);
 
-    // A click while the pointer is loose is what captures it, so the mouse only
-    // fires once it is captured; otherwise the click that grabs the pointer
-    // would also loose a shot.
+    // Clicking with the pointer loose captures it, so the mouse only fires once
+    // captured; otherwise the click that grabs the pointer also fires a shot.
     const bool mouseCaptured = GameApp::GetInstance()->IsMouseCaptured();
     bool firing = IsKeyDown(KEY_SPACE) || (mouseCaptured && IsMouseButtonDown(MOUSE_BUTTON_LEFT));
 

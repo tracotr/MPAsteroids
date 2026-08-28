@@ -54,8 +54,8 @@ struct AsteroidFrame {
     Matrix Rotation;
     float Scale;
 
-    // Reaches every corner, so it never misses a hit. Used to reject far-off
-    // asteroids before doing the real test.
+    // Reaches every corner, so it never misses a hit. Rejects far-off asteroids
+    // before the real test runs.
     float Radius;
 
     // The rock's actual bulk, used for the test itself.

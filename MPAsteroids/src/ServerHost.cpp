@@ -144,9 +144,9 @@ private:
     }
 
     // Counts players actually in the world, not just ones with a socket open.
-    // Asteroids are placed and wrapped around players whose position we know, so
-    // counting a player who has connected but not sent one yet would have us
-    // spawn rocks and then delete them again on the same tick.
+    // The world is built around players whose position we know, so counting one
+    // that has connected but not sent a position yet would switch on nothing and
+    // leave us spawning rocks with nowhere to put them.
     int ActivePlayerCount() const
     {
         int count = 0;
@@ -199,14 +199,14 @@ private:
 
     // --- The play area -------------------------------------------------------
     //
-    // Rather than one bubble that follows whoever is nearest, the world is a set
-    // of cubes. A cube switches on wherever a player is and switches off once
-    // nobody has been inside for a while, so the world grows as people explore
-    // and shrinks back afterwards. Asteroids are simply kept inside the union.
+    // The world is a set of cubes. Cubes switch on wherever a player is and
+    // switch off once nobody has been inside for a while, so it grows as people
+    // explore and shrinks back afterwards. Asteroids are kept inside whatever is
+    // switched on.
     //
-    // The old bubble had to put a wrapped asteroid somewhere relative to a
-    // player, which is what dropped rocks into people's laps. Here there is a
-    // whole world to choose a spot in, so it can pick one nobody is standing in.
+    // Because the world is a place rather than a bubble around one player, an
+    // asteroid being put back into play can be given a spot nobody is standing
+    // in, instead of one measured out from whoever happens to be closest.
 
     static int CellIndexOf(float value)
     {
@@ -242,9 +242,10 @@ private:
         regionCellCount++;
     }
 
-    // Switches on the eight cubes meeting at the lattice corner nearest the
-    // player. Lighting only the cube they stand in would leave anyone near an
-    // edge with world on one side and nothing on the other.
+    // Switches on the eight cubes that meet at the grid corner nearest the
+    // player, which keeps them well inside the world. Switching on only the cube
+    // they stand in leaves anyone near an edge with world on one side and
+    // nothing on the other.
     void TouchRegionAround(const Vector3& position, double now)
     {
         const int cx = (int)roundf(position.x / REGION_CELL_SIZE);
@@ -306,8 +307,8 @@ private:
         return (closest == MAX_SQR_V3) ? -1.0f : sqrtf(closest);
     }
 
-    // Samples a cube for a spot with room around it. This is what stops an
-    // asteroid being put back into play on top of somebody.
+    // Looks for a spot in the cube with room around it, so an asteroid is never
+    // put back into play on top of somebody.
     Vector3 PickPlacementInCell(int index)
     {
         Vector3 best = RandomPointInCell(index);
@@ -379,9 +380,9 @@ private:
     }
 
     // Tops the field up, always filling whichever cube has the fewest asteroids.
-    // Spreading spawns at random instead left a player who had just arrived
-    // somewhere new sitting in an empty sky, because their fresh cubes were only
-    // as likely to be chosen as every long-settled one.
+    // Someone who has just reached somewhere new needs their empty cubes filled
+    // first; picking cubes at random would leave them in an empty sky while
+    // long-settled ones got topped up alongside them.
     void MaintainAsteroidPopulation()
     {
         const int desired = DesiredAsteroidCount();
@@ -612,8 +613,7 @@ private:
                 continue;
             }
 
-            // Put back somewhere in the world with room around it, instead of
-            // mirrored through whoever happened to be nearest.
+            // Put back somewhere in the world with room around it.
             asteroid.Position = PickPlacementInCell(EmptiestRegionCell());
             asteroid.Velocity = Vector3Scale(RandomDirection(), RandBetween(1.2f, 3.2f));
         }

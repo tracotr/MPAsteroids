@@ -12,10 +12,9 @@
 // lower; the spare room is there so a burst of splits always has space.
 #define MAX_ASTEROIDS 256
 
-// The play area is a set of cubes this wide. Each player switches on the block
-// of eight that meets at the lattice corner nearest them, so they are always
-// well inside the world rather than standing on its edge. Go somewhere new and
-// more cubes switch on, so the world grows as people explore.
+// The play area is a set of cubes this wide. Each player switches on the eight
+// that meet at the grid corner nearest them, so they always have world around
+// them rather than standing on its edge. Go somewhere new and more switch on.
 #define REGION_CELL_SIZE 35.0f
 
 // Cells switch off again after this long with nobody inside, which keeps the

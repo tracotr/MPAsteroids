@@ -245,11 +245,11 @@ void World::RefreshAsteroidFrame()
     }
 }
 
-// Moves a world point into a model's own space. These rotations are pure, so
-// transposing one inverts it. Testing there means the result does not change
-// with the model's orientation, which an axis-aligned world box cannot manage:
-// enclosing a rotated box makes it up to 75% wider, and a spinning asteroid
-// would grab at players from most of a rock's width away.
+// Moves a world point into a model's own space. These matrices only rotate, so
+// transposing one is the same as inverting it. Testing in that space gives the
+// same answer whichever way the model is turned. Boxing a rotated model in the
+// world instead makes the box up to 75% wider, so a spinning asteroid would
+// reach out and grab players from most of a rock's width away.
 static Vector3 ToLocalSpace(Vector3 worldPoint, Vector3 origin, const Matrix& rotation)
 {
     return Vector3Transform(Vector3Subtract(worldPoint, origin), MatrixTranspose(rotation));
@@ -329,8 +329,8 @@ bool World::CheckShipCollisions()
         if (Vector3DistanceSqr(frame.Position, PlayerShip.Position) > reach * reach)
             continue;
 
-        // The ship keeps its real shape, since that is what the player is
-        // steering; the rock is near enough a ball to treat as one.
+        // The ship keeps its real shape, since the player steers it precisely;
+        // the rock is near enough a ball to treat as one.
         Vector3 local = ToLocalSpace(frame.Position, PlayerShip.Position, PlayerShip.Rotation);
         if (!CheckCollisionBoxSphere(Models::ShipBoxLocal, local, frame.BodyRadius))
             continue;
