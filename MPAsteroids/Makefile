@@ -15,12 +15,12 @@
 
 # Where the built web client connects. For a proxied production deploy:
 #   make SERVER_HOST=asteroids.example.com SERVER_PUBLIC_PORT=443 SERVER_PATH=/ws
-SERVER_HOST           ?= 127.0.0.1
+SERVER_HOST           ?= asteroids.jaxon-king.com
 # Port the server binds locally (kept private behind a reverse proxy).
-SERVER_PORT           ?= 25665
+SERVER_PORT           ?= 443
 # Port the browser dials, and the path it requests.
 SERVER_PUBLIC_PORT    ?= $(SERVER_PORT)
-SERVER_PATH           ?= /
+SERVER_PATH           ?= /ws
 
 PROJECT_NAME          ?= mpasteroids
 SERVER_NAME           ?= mpasteroids-server
