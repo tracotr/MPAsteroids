@@ -1,11 +1,14 @@
 name: Deploy
 
-# Builds the web client and ships it, along with a freshly built game server, to
-# the host that serves asteroids.jaxon-king.com.
+# Builds both halves of the game here, then sends the finished files to the
+# Ubuntu host and restarts the service.
 #
-# Both halves go out together on purpose. The two share a packet format, so a new
+# Both halves go out together on purpose. They share a packet format, so a new
 # client talking to an old server cannot read asteroid updates. Never deploy one
 # without the other.
+#
+# Files are sent with tar over SSH rather than rsync, which has to be installed
+# at both ends. tar and ssh are on every image.
 
 on:
   push:
@@ -26,16 +29,15 @@ env:
   PUBLIC_PATH: /ws
   GAME_SERVER_PORT: "25665"
 
-  # Where the host keeps its clone, and where Caddy serves files from. Files are
-  # staged in the deploy user's home first: they own the web root itself but not
-  # its parent, so a staging directory cannot be created next to it.
-  REMOTE_REPO: ~/MPAsteroids/MPAsteroids
+  # Where the systemd unit expects the binary, and where Caddy serves files from.
+  REMOTE_BIN_DIR: ~/MPAsteroids/MPAsteroids
   REMOTE_WEB_ROOT: /var/www/mpasteroids
-  REMOTE_STAGING: ~/mpasteroids-web
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    # Older than the host would produce a binary the host's glibc cannot load, so
+    # this wants to be no newer than the Ubuntu release on the VM.
+    runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@v4
@@ -56,12 +58,16 @@ jobs:
             SERVER_PUBLIC_PORT='${{ env.PUBLIC_PORT }}' \
             SERVER_PATH='${{ env.PUBLIC_PATH }}'
 
+      - name: Build game server
+        run: |
+          make -C MPAsteroids server SERVER_PORT=${{ env.GAME_SERVER_PORT }}
+
       # Catches the mistake that costs the most time to diagnose: a client built
-      # pointing at localhost, which fails only once it is live in a browser.
-      - name: Check the client points at production
+      # pointing at localhost, which only fails once it is live in a browser.
+      - name: Check the build targets production
         run: |
           cd MPAsteroids
-          for f in mpasteroids.html mpasteroids.js mpasteroids.wasm mpasteroids.data; do
+          for f in mpasteroids.html mpasteroids.js mpasteroids.wasm mpasteroids.data mpasteroids-server; do
             test -s "$f" || { echo "missing build output: $f"; exit 1; }
           done
           grep -q '${{ env.PUBLIC_HOST }}' mpasteroids.wasm \
@@ -70,6 +76,7 @@ jobs:
             echo "client still points at localhost"; exit 1
           fi
           echo "client targets ${{ env.PUBLIC_HOST }}:${{ env.PUBLIC_PORT }}${{ env.PUBLIC_PATH }}"
+          echo "server binds ${{ env.GAME_SERVER_PORT }}"
 
       - name: Authorise SSH
         env:
@@ -81,44 +88,52 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
-      # Copied to a staging directory first, then moved into place in one step,
-      # so nobody loading the page mid-deploy gets a half-updated set of files.
-      - name: Upload web client
+      # Everything lands in the home directory first. The deploy user owns the
+      # web root but not its parent, so a staging directory cannot be created
+      # beside it, and the running binary is replaced rather than written over.
+      - name: Send the built files
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
-          rsync -az --delete -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes" \
-            MPAsteroids/mpasteroids.html \
-            MPAsteroids/mpasteroids.js \
-            MPAsteroids/mpasteroids.wasm \
-            MPAsteroids/mpasteroids.data \
-            "$DEPLOY_USER@$DEPLOY_HOST:${{ env.REMOTE_STAGING }}/"
+          SSH="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes"
 
-      # The server is built on the host rather than here, so it links against
-      # that machine's libraries instead of whatever this runner happens to have.
-      - name: Build and restart the game server
+          tar -czf - -C MPAsteroids \
+              mpasteroids.html mpasteroids.js mpasteroids.wasm mpasteroids.data \
+            | $SSH "$DEPLOY_USER@$DEPLOY_HOST" \
+                'rm -rf ~/mpasteroids-incoming && mkdir -p ~/mpasteroids-incoming && tar -xzf - -C ~/mpasteroids-incoming'
+
+          tar -czf - -C MPAsteroids mpasteroids-server \
+            | $SSH "$DEPLOY_USER@$DEPLOY_HOST" \
+                'tar -xzf - -C ~/mpasteroids-incoming'
+
+          $SSH "$DEPLOY_USER@$DEPLOY_HOST" 'ls -l ~/mpasteroids-incoming'
+
+      - name: Install and restart
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
             "$DEPLOY_USER@$DEPLOY_HOST" bash -euo pipefail <<REMOTE
-          cd ${{ env.REMOTE_REPO }}
-          git fetch --all
-          git reset --hard origin/main
+          # Keep the previous set in home, where this user can write.
+          rm -rf ~/mpasteroids-previous
+          cp -a ${{ env.REMOTE_WEB_ROOT }} ~/mpasteroids-previous || true
 
-          # SERVER_PORT is the port the server binds, and must match the
-          # reverse_proxy line in deploy/Caddyfile. The Makefile default is the
-          # public HTTPS port, which Caddy already holds.
-          make server SERVER_PORT=${{ env.GAME_SERVER_PORT }}
-
-          # Keep the outgoing set in home, where this user can write, then move
-          # the new files into the web root they own.
-          rm -rf ~/mpasteroids-web-previous
-          cp -a ${{ env.REMOTE_WEB_ROOT }} ~/mpasteroids-web-previous
-          cp -a ${{ env.REMOTE_STAGING }}/. ${{ env.REMOTE_WEB_ROOT }}/
+          cp -a ~/mpasteroids-incoming/mpasteroids.html \
+                ~/mpasteroids-incoming/mpasteroids.js \
+                ~/mpasteroids-incoming/mpasteroids.wasm \
+                ~/mpasteroids-incoming/mpasteroids.data \
+                ${{ env.REMOTE_WEB_ROOT }}/
           chmod -R o+rX ${{ env.REMOTE_WEB_ROOT }}
+
+          # mv rather than cp: the old binary is still running, and replacing the
+          # directory entry is allowed where writing over the file is not.
+          mkdir -p ${{ env.REMOTE_BIN_DIR }}
+          chmod +x ~/mpasteroids-incoming/mpasteroids-server
+          mv -f ~/mpasteroids-incoming/mpasteroids-server ${{ env.REMOTE_BIN_DIR }}/mpasteroids-server
+
+          rm -rf ~/mpasteroids-incoming
 
           # Disconnects everyone playing. Unavoidable: the packet format is
           # shared, so the server cannot lag behind the client just deployed.
