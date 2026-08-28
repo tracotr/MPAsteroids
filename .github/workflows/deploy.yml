@@ -1,0 +1,140 @@
+name: Deploy
+
+# Builds the web client and ships it, along with a freshly built game server, to
+# the host that serves asteroids.jaxon-king.com.
+#
+# Both halves go out together on purpose. The two share a packet format, so a new
+# client talking to an old server cannot read asteroid updates. Never deploy one
+# without the other.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A second run would otherwise overwrite the first half-way through copying.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  # The browser dials the public HTTPS port and Caddy forwards to the port the
+  # game server binds. They are different numbers, which is why both are set
+  # here rather than left to the Makefile defaults.
+  PUBLIC_HOST: asteroids.jaxon-king.com
+  PUBLIC_PORT: "443"
+  PUBLIC_PATH: /ws
+  GAME_SERVER_PORT: "25665"
+
+  # Where the host keeps its clone, and where Caddy serves files from. Files are
+  # staged in the deploy user's home first: they own the web root itself but not
+  # its parent, so a staging directory cannot be created next to it.
+  REMOTE_REPO: ~/MPAsteroids/MPAsteroids
+  REMOTE_WEB_ROOT: /var/www/mpasteroids
+  REMOTE_STAGING: ~/mpasteroids-web
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # lib/libraylib.web.a is a prebuilt archive in the repo. If a future
+      # Emscripten release stops linking against it, pin this to the version it
+      # was built with rather than chasing the error.
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+          actions-cache-folder: emsdk-cache
+
+      - name: Build web client
+        run: |
+          make -C MPAsteroids web \
+            SERVER_HOST='${{ env.PUBLIC_HOST }}' \
+            SERVER_PUBLIC_PORT='${{ env.PUBLIC_PORT }}' \
+            SERVER_PATH='${{ env.PUBLIC_PATH }}'
+
+      # Catches the mistake that costs the most time to diagnose: a client built
+      # pointing at localhost, which fails only once it is live in a browser.
+      - name: Check the client points at production
+        run: |
+          cd MPAsteroids
+          for f in mpasteroids.html mpasteroids.js mpasteroids.wasm mpasteroids.data; do
+            test -s "$f" || { echo "missing build output: $f"; exit 1; }
+          done
+          grep -q '${{ env.PUBLIC_HOST }}' mpasteroids.wasm \
+            || { echo "client was not built for ${{ env.PUBLIC_HOST }}"; exit 1; }
+          if grep -q '127\.0\.0\.1' mpasteroids.wasm; then
+            echo "client still points at localhost"; exit 1
+          fi
+          echo "client targets ${{ env.PUBLIC_HOST }}:${{ env.PUBLIC_PORT }}${{ env.PUBLIC_PATH }}"
+
+      - name: Authorise SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      # Copied to a staging directory first, then moved into place in one step,
+      # so nobody loading the page mid-deploy gets a half-updated set of files.
+      - name: Upload web client
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          rsync -az --delete -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes" \
+            MPAsteroids/mpasteroids.html \
+            MPAsteroids/mpasteroids.js \
+            MPAsteroids/mpasteroids.wasm \
+            MPAsteroids/mpasteroids.data \
+            "$DEPLOY_USER@$DEPLOY_HOST:${{ env.REMOTE_STAGING }}/"
+
+      # The server is built on the host rather than here, so it links against
+      # that machine's libraries instead of whatever this runner happens to have.
+      - name: Build and restart the game server
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" bash -euo pipefail <<REMOTE
+          cd ${{ env.REMOTE_REPO }}
+          git fetch --all
+          git reset --hard origin/main
+
+          # SERVER_PORT is the port the server binds, and must match the
+          # reverse_proxy line in deploy/Caddyfile. The Makefile default is the
+          # public HTTPS port, which Caddy already holds.
+          make server SERVER_PORT=${{ env.GAME_SERVER_PORT }}
+
+          # Keep the outgoing set in home, where this user can write, then move
+          # the new files into the web root they own.
+          rm -rf ~/mpasteroids-web-previous
+          cp -a ${{ env.REMOTE_WEB_ROOT }} ~/mpasteroids-web-previous
+          cp -a ${{ env.REMOTE_STAGING }}/. ${{ env.REMOTE_WEB_ROOT }}/
+          chmod -R o+rX ${{ env.REMOTE_WEB_ROOT }}
+
+          # Disconnects everyone playing. Unavoidable: the packet format is
+          # shared, so the server cannot lag behind the client just deployed.
+          sudo systemctl restart mpasteroids
+          REMOTE
+
+      - name: Check it came back up
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          sleep 3
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "systemctl is-active --quiet mpasteroids && echo 'game server running' || (journalctl -u mpasteroids -n 30 --no-pager; exit 1)"
+
+          code=$(curl -s -o /dev/null -w '%{http_code}' "https://${{ env.PUBLIC_HOST }}/mpasteroids.html")
+          echo "site returned HTTP $code"
+          test "$code" = "200"
