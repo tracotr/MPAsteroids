@@ -63,9 +63,6 @@
 #define MIN_ASTEROID_SCALE 0.45f
 #define ASTEROID_SPLIT_FACTOR 0.68f
 
-#define SCREEN_WIDTH 1280
-#define SCREEN_HEIGHT 720
-
 // Port the server binds. Behind a reverse proxy this stays private to the host.
 #ifndef SERVER_PORT
 #define SERVER_PORT 25665

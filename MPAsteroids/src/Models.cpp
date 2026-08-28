@@ -130,7 +130,7 @@ namespace Models
         DrawText(readout, GetScreenWidth() - margin - width, GetScreenHeight() - margin - fontSize, fontSize, GRAY);
     }
 
-    void DrawUI(Camera camera, Vector3 velocity, Vector3 position, int id, int (&scoreboard)[MAX_PLAYERS], char (&names)[MAX_PLAYERS][MAX_PLAYER_NAME_LENGTH])
+    void DrawUI(Vector3 position, int id, int (&scoreboard)[MAX_PLAYERS], char (&names)[MAX_PLAYERS][MAX_PLAYER_NAME_LENGTH])
     {
         DrawControlHints();
         DrawCoordinates(position);
@@ -187,34 +187,5 @@ namespace Models
                 break;
             }
         }
-    }
-
-    BoundingBox GetWorldBoundingBox(BoundingBox localBox, Vector3 position, Matrix rotation)
-    {
-        Vector3 corners[8] = {
-            { localBox.min.x, localBox.min.y, localBox.min.z },
-            { localBox.max.x, localBox.min.y, localBox.min.z },
-            { localBox.min.x, localBox.max.y, localBox.min.z },
-            { localBox.max.x, localBox.max.y, localBox.min.z },
-            { localBox.min.x, localBox.min.y, localBox.max.z },
-            { localBox.max.x, localBox.min.y, localBox.max.z },
-            { localBox.min.x, localBox.max.y, localBox.max.z },
-            { localBox.max.x, localBox.max.y, localBox.max.z }
-        };
-
-        BoundingBox result;
-        result.min = (Vector3){ FLT_MAX, FLT_MAX, FLT_MAX };
-        result.max = (Vector3){ -FLT_MAX, -FLT_MAX, -FLT_MAX };
-
-        for (int i = 0; i < 8; i++)
-        {
-            Vector3 worldCorner = Vector3Transform(corners[i], rotation);
-            worldCorner = Vector3Add(worldCorner, position);
-
-            result.min = Vector3Min(result.min, worldCorner);
-            result.max = Vector3Max(result.max, worldCorner);
-        }
-
-        return result;
     }
 }

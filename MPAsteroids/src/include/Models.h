@@ -6,8 +6,6 @@
 
 #include "networking/NetConstants.h"
 
-#include <float.h>
-
 namespace Models
 {
     extern Model Skybox;
@@ -31,6 +29,5 @@ namespace Models
 
     void DrawModel(Model model, const Vector3& position, const Matrix& rotation, float scale = 1.0f);
     void DrawSkybox();
-    void DrawUI(Camera camera, Vector3 velocity, Vector3 position, int id, int (&scoreboard)[MAX_PLAYERS], char (&names)[MAX_PLAYERS][MAX_PLAYER_NAME_LENGTH]);
-    BoundingBox GetWorldBoundingBox(BoundingBox localBox, Vector3 position, Matrix rotation);
+    void DrawUI(Vector3 position, int id, int (&scoreboard)[MAX_PLAYERS], char (&names)[MAX_PLAYERS][MAX_PLAYER_NAME_LENGTH]);
 }

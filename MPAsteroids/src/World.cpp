@@ -87,12 +87,10 @@ void World::Draw()
 
 void World::DrawUI()
 {
-    Camera3D camera = GameApp::GetInstance()->GetCamera();
-    
     Player& PlayerShip = GameApp::GetInstance()->GetPlayer();
     NetClient& Net = GameApp::GetInstance()->GetNet();
 
-    Models::DrawUI(camera, PlayerShip.Velocity, PlayerShip.Position, Net.GetLocalPlayerId(), Net.GetScoreboard(), Net.GetPlayerNames());
+    Models::DrawUI(PlayerShip.Position, Net.GetLocalPlayerId(), Net.GetScoreboard(), Net.GetPlayerNames());
 
     auto& playerNames = Net.GetPlayerNames();
     PlayerIndicator otherPlayersData[MAX_PLAYERS];

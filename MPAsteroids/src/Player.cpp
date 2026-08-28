@@ -100,7 +100,6 @@ void Player::Draw()
 
 void Player::Reset()
 {
-    Alive = true;
     Respawn();
 }
 

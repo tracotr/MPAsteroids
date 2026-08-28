@@ -151,8 +151,6 @@ public:
 
     NetStatus GetStatus() const { return Status; }
     int GetLocalPlayerId() { return LocalPlayerId; };
-    const char* GetLocalPlayerName() const { return LocalPlayerName; }
-    const char* GetPlayerName(int id) const { return (id >= 0 && id < MAX_PLAYERS) ? PlayerNames[id] : ""; }
     int GetAsteroidCount() const { return AsteroidCount; };
     int (&GetScoreboard())[MAX_PLAYERS] { return Scoreboard; };
     char (&GetPlayerNames())[MAX_PLAYERS][MAX_PLAYER_NAME_LENGTH] { return PlayerNames; }
