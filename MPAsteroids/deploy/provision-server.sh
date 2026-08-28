@@ -3,6 +3,7 @@
 # MPAsteroids dedicated server + web client behind Caddy (automatic HTTPS).
 #
 # Usage, on the VM:
+#   sudo apt update && sudo apt install -y git
 #   git clone https://github.com/tracotr/MPAsteroids.git
 #   cd MPAsteroids/MPAsteroids/deploy
 #   chmod +x provision-server.sh
@@ -83,7 +84,7 @@ cat <<DONE
      then copy the 4 output files here:
        scp mpasteroids.html mpasteroids.js mpasteroids.wasm mpasteroids.data \\
            $SERVICE_USER@<this-vm-ip>:/var/www/mpasteroids/
-  4. Visit https://asteroids.jaxon-king.com — Caddy issues the HTTPS cert
+  4. Visit https://asteroids.jaxon-king.com - Caddy issues the HTTPS cert
      automatically on first request once DNS + firewall are in place.
 
 Check the server logs anytime with: sudo systemctl status mpasteroids
