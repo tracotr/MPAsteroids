@@ -22,9 +22,8 @@ public:
 
     NetClient& GetNet() { return Net; }
 
-    // Whether the browser has actually given us pointer lock. Do not use
-    // raylib's IsCursorHidden() for this: on web DisableCursor() only requests
-    // the lock and leaves that flag alone, so it never becomes true.
+    // Whether the browser has actually given us pointer lock. Not IsCursorHidden():
+    // on web DisableCursor() only requests the lock and never sets that flag.
     bool IsMouseCaptured() const { return mouseCaptured; }
     Player& GetPlayer() { return PlayerShip; }
 

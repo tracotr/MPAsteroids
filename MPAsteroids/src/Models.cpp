@@ -84,9 +84,8 @@ namespace Models
         rlEnableDepthMask();
     }
     
-    // Key hints in the bottom-left corner, dim and small so they sit behind the
-    // action rather than competing with it. Kept in step with Player::Update by
-    // hand, so change both together.
+    // Key hints, dim and small so they sit behind the action. Kept in step with
+    // Player::Update by hand, so change both together.
     static void DrawControlHints()
     {
         static const char* const hints[] = {

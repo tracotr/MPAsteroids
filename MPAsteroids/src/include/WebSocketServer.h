@@ -1,11 +1,7 @@
 #pragma once
 
-// Minimal RFC 6455 WebSocket server: binary messages, no extensions, no TLS.
-// TLS is deliberately absent because the server runs behind a reverse proxy
-// that terminates wss:// and forwards plain ws:// over localhost.
-//
-// Single-threaded and select()-based, sized for a game lobby of dozens of
-// connections rather than high-concurrency public traffic.
+// Minimal WebSocket server: binary messages, no extensions, no TLS, since a proxy
+// terminates wss:// for us. Single-threaded, sized for a lobby of dozens.
 
 #include <cstdint>
 #include <cstddef>

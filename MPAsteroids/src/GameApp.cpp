@@ -168,9 +168,8 @@ void GameApp::ProcessPlaying()
         return;
     }
 
-    // A backgrounded tab stops receiving frames, so the first frame after it
-    // regains focus carries a delta of however long it was hidden. Uncapped,
-    // that teleports the ship and its projectiles across the map.
+    // A backgrounded tab stops receiving frames, so the first one back carries a
+    // delta of however long it was hidden, which would teleport the ship.
     float delta = GetFrameTime();
     if (delta > MAX_FRAME_DELTA) delta = MAX_FRAME_DELTA;
 
@@ -190,8 +189,7 @@ void GameApp::ProcessPlaying()
 }
 
 // Browsers only hand over pointer lock from inside a real user gesture, so it is
-// requested on the click itself rather than on entering the game. Escape gives
-// the pointer back, and the next click takes it again.
+// requested on the click rather than on entering the game.
 void GameApp::UpdateMouseCapture()
 {
     // The browser is the authority here. DisableCursor() only asks for the lock,
@@ -213,7 +211,10 @@ void GameApp::UpdateCamera()
     camera.target = PlayerShip.Position;
     camera.up = upVector;
 
-    float speedRatio = Clamp(Vector3LengthSqr(PlayerShip.Velocity) / PlayerShip.MaxSpeed, 0.0f, 1.0f);
+    // A real fraction of the ship's real top speed. This used to divide a squared
+    // length by a number that was not a speed at all.
+    const float topSpeed = Net.GetStats().TopSpeed;
+    float speedRatio = Clamp(Vector3Length(PlayerShip.Velocity) / (topSpeed > 0.0f ? topSpeed : 1.0f), 0.0f, 1.0f);
     float targetFOV = Lerp(90, 110, speedRatio);
     camera.fovy = Lerp(camera.fovy, targetFOV, 0.1f);
 }

@@ -56,8 +56,14 @@ bool NetClient::NetConnect(const char* serverAddress, const char* playerName)
     NetDisconnect();
 
     LocalPlayerId = -1;
-    RemoteProjectileCount = 0;
+    RemoteVolleyCount = 0;
     AsteroidCount = 0;
+
+    // The server sends the real build the moment it accepts us. This is only so
+    // that a frame drawn before that arrives has sane numbers to work from.
+    Upgrades.Reset();
+    LocalHealth = Upgrades.Stats().MaxHealth;
+    LocalMaxHealth = Upgrades.Stats().MaxHealth;
     std::memset(Players, 0, sizeof(Players));
     std::memset(PlayerNames, 0, sizeof(PlayerNames));
     std::memset(Scoreboard, 0, sizeof(Scoreboard));
@@ -84,9 +90,8 @@ bool NetClient::NetConnect(const char* serverAddress, const char* playerName)
     else
         std::snprintf(url, sizeof(url), "%s://%s:%d%s", scheme, serverAddress, port, SERVER_PATH);
 
-    // The compile-time address is only a default. The page can retarget this build
-    // without a rebuild, which matters when the server sits behind a tunnel whose
-    // hostname changes. Accepts a bare host, host:port, or a full URL.
+    // The compile-time address is only a default; the page can retarget this build
+    // without a rebuild. Accepts a bare host, host:port, or a full URL.
     char serverOverride[256] = { 0 };
 
     // EM_ASM splits its body on top-level commas, so declare each var separately.
@@ -179,7 +184,7 @@ void NetClient::OnSocketClosed()
     Status = NetStatus::Disconnected;
     LocalPlayerId = -1;
     AsteroidCount = 0;
-    RemoteProjectileCount = 0;
+    RemoteVolleyCount = 0;
     killedPending = false;
     killedBy = -1;
     std::memset(Players, 0, sizeof(Players));
@@ -205,6 +210,11 @@ void NetClient::HandleAddPlayer(PlayerPacket packet)
     Players[remotePlayer].TargetPosition = packet.Position;
 	Players[remotePlayer].Rotation = packet.Rotation;
 	Players[remotePlayer].LastUpdateTime = LastNow;
+
+    Players[remotePlayer].Health = packet.Health;
+    Players[remotePlayer].MaxHealth = packet.MaxHealth;
+    Players[remotePlayer].Level = packet.Level;
+    Players[remotePlayer].Evolution = packet.Evolution;
 }
 
 void NetClient::HandleRemovePlayer(PlayerPacket packet)
@@ -232,6 +242,11 @@ void NetClient::HandleUpdatePlayer(PlayerPacket packet)
 	Players[remotePlayer].TargetPosition = packet.Position;
     Players[remotePlayer].Rotation = packet.Rotation;
 	Players[remotePlayer].LastUpdateTime = LastNow;
+
+    Players[remotePlayer].Health = packet.Health;
+    Players[remotePlayer].MaxHealth = packet.MaxHealth;
+    Players[remotePlayer].Level = packet.Level;
+    Players[remotePlayer].Evolution = packet.Evolution;
 }
 
 void NetClient::UpdateLocalPlayer(Vector3 pos, Matrix rot)
@@ -257,22 +272,19 @@ bool NetClient::GetPlayerSpatial(int id, Vector3* pos, Matrix* rot)
     return true;
 }
 
-// Whether a player has gone quiet. Kept separate from GetPlayerSpatial on
-// purpose: a quiet player is still drawn, they just cannot be shot. Hiding the
-// ship as well makes anyone on a stuttering connection blink in and out.
-// Keeps running while the tab is in the background, unlike the frame clock,
-// which is why this one can measure how long a packet sat in the queue.
+// Whether a player has gone quiet. Separate from GetPlayerSpatial on purpose: a
+// quiet player is still drawn, they just cannot be shot.
 static double NowSeconds()
 {
     return emscripten_get_now() * 0.001;
 }
 
-double NetClient::QueuedProjectileAge(int index) const
+double NetClient::QueuedVolleyAge(int index) const
 {
-    if (index < 0 || index >= RemoteProjectileCount)
+    if (index < 0 || index >= RemoteVolleyCount)
         return 0.0;
 
-    double age = NowSeconds() - RemoteProjectilesQueue[index].ArrivalTime;
+    double age = NowSeconds() - RemoteVolleyQueue[index].ArrivalTime;
     return age > 0.0 ? age : 0.0;
 }
 
@@ -284,20 +296,61 @@ bool NetClient::IsPlayerStale(int id) const
     return (LastNow - Players[id].LastUpdateTime) > PLAYER_STALE_SECONDS;
 }
 
-void NetClient::HandlePlayerCollision()
+// The rock is hidden now, because it is about to break whatever else happens.
+// What it costs us is scaled by the server from its size and our hull.
+void NetClient::ReportAsteroidCollision(uint32_t asteroidId)
 {
-    ScoreboardPacket scoreboardBuffer = {};
-    scoreboardBuffer.Command = NetworkCommands::ResetScoreboardId;
-    scoreboardBuffer.Id = LocalPlayerId;
+    if (asteroidId == 0)
+        return;
 
-    SendPacket(&scoreboardBuffer, sizeof(scoreboardBuffer));
+    HideAsteroidLocally(asteroidId);
+
+    AsteroidCollisionPacket buffer = {};
+    buffer.Command = NetworkCommands::AsteroidCollision;
+    buffer.AsteroidId = asteroidId;
+
+    SendPacket(&buffer, sizeof(buffer));
+}
+
+void NetClient::SendUpgradeChoice(uint8_t upgradeId)
+{
+    UpgradeChoosePacket buffer = {};
+    buffer.Command = NetworkCommands::ChooseUpgrade;
+    buffer.UpgradeId = upgradeId;
+
+    SendPacket(&buffer, sizeof(buffer));
+}
+
+bool NetClient::GetPlayerHealth(int id, float* health, float* maxHealth) const
+{
+    if (id < 0 || id >= MAX_PLAYERS || !Players[id].Active || Players[id].MaxHealth <= 0.0f)
+        return false;
+
+    if (health != nullptr) *health = Players[id].Health;
+    if (maxHealth != nullptr) *maxHealth = Players[id].MaxHealth;
+    return true;
+}
+
+uint8_t NetClient::GetPlayerEvolution(int id) const
+{
+    if (id < 0 || id >= MAX_PLAYERS || !Players[id].Active)
+        return UPGRADE_NONE;
+
+    return Players[id].Evolution;
+}
+
+int NetClient::GetPlayerLevel(int id) const
+{
+    if (id < 0 || id >= MAX_PLAYERS || !Players[id].Active)
+        return 0;
+
+    return (int)Players[id].Level;
 }
 
 namespace
 {
-    // Asteroids arrive with a seed instead of a rotation, so the spin is worked
-    // out here. It comes from the seed alone, so every player sees the same rock
-    // turning the same way without any of it being sent.
+    // Asteroids arrive with a seed instead of a rotation, so the spin is worked out
+    // here. From the seed alone, so every player sees the same rock turning.
     void DeriveSpin(uint8_t seed, Vector3* axis, float* speed)
     {
         uint32_t hash = (uint32_t)seed * 2654435761u;
@@ -312,15 +365,12 @@ namespace
     }
 }
 
-// Merges an update into the list we already hold, in place. Asteroids we have
-// seen before keep the position we were drawing them at and how far through
-// their spin they are; ones the server no longer lists are dropped. Matched by
-// Id and never by array slot, since both sides reuse slots freely.
-void NetClient::ReportKill(int victimId)
+// Merges an update into the list we hold, keeping the position and spin of rocks
+// we have seen before. Matched by Id, since both sides reuse slots freely.
+void NetClient::ReportHit(int victimId)
 {
-    PlayerKillPacket buffer = {};
-    buffer.Command = NetworkCommands::PlayerKilled;
-    buffer.KillerId = LocalPlayerId;
+    PlayerHitPacket buffer = {};
+    buffer.Command = NetworkCommands::PlayerHit;
     buffer.VictimId = victimId;
 
     SendPacket(&buffer, sizeof(buffer));
@@ -374,6 +424,10 @@ void NetClient::ApplyAsteroidSnapshot(const AsteroidInfoPacket& packet, int coun
         asteroid.Velocity = info.Velocity;
         asteroid.Scale = info.Scale;
 
+        // The server's figure wins. Ours was a guess made between broadcasts, and
+        // it does not know what anyone else has been shooting at.
+        asteroid.Health = info.Health;
+
         // Too far off to be our own guess drifting: the server has moved it.
         if (Vector3DistanceSqr(asteroid.Position, asteroid.ServerPosition) >
             ASTEROID_SNAP_DISTANCE * ASTEROID_SNAP_DISTANCE)
@@ -404,33 +458,58 @@ void NetClient::ApplyAsteroidSnapshot(const AsteroidInfoPacket& packet, int coun
     }
 }
 
-void NetClient::ReportAsteroidDestroyed(uint32_t asteroidId)
+// Returns false when the same asteroid was hidden a moment ago, which is the
+// caller's cue not to bother the server about it again.
+void NetClient::HideAsteroidLocally(uint32_t asteroidId)
+{
+    for (int i = 0; i < AsteroidCount; i++)
+    {
+        if (Asteroids[i].Id != asteroidId)
+            continue;
+
+        // Hidden without waiting for the round trip, so hitting a rock feels
+        // immediate. The grace period restores it if the server declines.
+        Asteroids[i].DestroyReportedAt = LastNow;
+        return;
+    }
+}
+
+bool NetClient::ReportAsteroidHit(uint32_t asteroidId, float damage)
 {
     if (asteroidId == 0)
-        return;
+        return false;
+
+    bool finished = false;
 
     for (int i = 0; i < AsteroidCount; i++)
     {
         if (Asteroids[i].Id != asteroidId)
             continue;
 
-        // Already reported and still within the wait period, so sending it
-        // again would just be ignored by the server.
+        // Already hidden and still within the wait period: our guess says this
+        // rock is gone, so there is nothing left to shoot at.
         if (Asteroids[i].DestroyReportedAt > 0.0 && LastNow - Asteroids[i].DestroyReportedAt < DESTROY_REPORT_GRACE)
-            return;
+            return true;
 
-        // Hidden without waiting for the round trip, so shooting feels
-        // immediate. The grace period restores it if the server declines.
-        Asteroids[i].DestroyReportedAt = LastNow;
+        Asteroids[i].Health -= damage;
+
+        // Hidden without waiting for the reply, so the shot that finishes a rock
+        // feels like it did. The grace period restores it if the server disagrees.
+        if (Asteroids[i].Health <= 0.0f)
+        {
+            Asteroids[i].DestroyReportedAt = LastNow;
+            finished = true;
+        }
         break;
     }
 
-    AsteroidDestroyPacket buffer = {};
-    buffer.Command = NetworkCommands::DestroyAsteroid;
+    AsteroidHitPacket buffer = {};
+    buffer.Command = NetworkCommands::HitAsteroid;
     buffer.PlayerID = LocalPlayerId;
     buffer.AsteroidId = asteroidId;
 
     SendPacket(&buffer, sizeof(buffer));
+    return finished;
 }
 
 uint32_t NetClient::GetAsteroidId(int index) const
@@ -561,22 +640,51 @@ void NetClient::DispatchPacket(const uint8_t* data, size_t length)
         memcpy(&recieved, data, sizeof(ScoreboardPacket));
         HandleUpdateScoreboard(recieved);
     }
-    else if (command == NetworkCommands::FireProjectile)
+    else if (command == NetworkCommands::FireVolley)
     {
-        if (length != sizeof(ProjectilePacket))
+        if (length != sizeof(VolleyPacket))
             return;
 
-        ProjectilePacket recieved;
-        memcpy(&recieved, data, sizeof(ProjectilePacket));
+        VolleyPacket recieved;
+        memcpy(&recieved, data, sizeof(VolleyPacket));
 
-        if (RemoteProjectileCount < MAX_PROJECTILES)
+        if (RemoteVolleyCount < MAX_REMOTE_VOLLEYS)
         {
-            RemoteProjectilesQueue[RemoteProjectileCount].ArrivalTime = NowSeconds();
-            RemoteProjectilesQueue[RemoteProjectileCount].PlayerId = recieved.PlayerID;
-            RemoteProjectilesQueue[RemoteProjectileCount].Position = recieved.Position;
-            RemoteProjectilesQueue[RemoteProjectileCount].Velocity = recieved.Velocity;
-            RemoteProjectileCount++;
+            RemoteVolleyEvent& queued = RemoteVolleyQueue[RemoteVolleyCount++];
+            queued.ArrivalTime = NowSeconds();
+            queued.PlayerId = recieved.PlayerID;
+            queued.Position = recieved.Position;
+            queued.Forward = recieved.Forward;
+            queued.Up = recieved.Up;
+            queued.Speed = recieved.Speed;
+            queued.Radius = recieved.Radius;
+            queued.Lifetime = recieved.Lifetime;
+            queued.WeaponId = recieved.WeaponId;
+            queued.VolleyIndex = recieved.VolleyIndex;
         }
+    }
+    else if (command == NetworkCommands::UpdateUpgrades)
+    {
+        if (length != sizeof(UpgradeStatePacket))
+            return;
+
+        UpgradeStatePacket recieved;
+        memcpy(&recieved, data, sizeof(UpgradeStatePacket));
+
+        // Everything the ship can do is recomputed from this by the same catalog
+        // the server ran, so the two never disagree about what a build means.
+        Upgrades.ReadFrom(recieved);
+    }
+    else if (command == NetworkCommands::UpdateHealth)
+    {
+        if (length != sizeof(PlayerHealthPacket))
+            return;
+
+        PlayerHealthPacket recieved;
+        memcpy(&recieved, data, sizeof(PlayerHealthPacket));
+
+        LocalHealth = recieved.Health;
+        LocalMaxHealth = recieved.MaxHealth;
     }
 }
 
@@ -587,13 +695,8 @@ void NetClient::NetUpdate(double now, float delta)
     if (Status != NetStatus::Connected)
         return;
 
-    // The server only sends updates ten times a second, so we keep asteroids and
-    // other players moving ourselves in between. When an update arrives we slide
-    // toward it rather than snapping to it; snapping throws away the movement we
-    // just did and makes the whole field twitch every time a packet lands.
-    //
-    // The amounts below use exp() rather than "rate * delta" so they work out the
-    // same at 30fps and 240fps, and cannot overshoot on a slow frame.
+    // Updates come ten times a second, so we keep things moving in between and
+    // slide toward each one rather than snapping, which would make the field twitch.
     const float asteroidBlend = 1.0f - expf(-ASTEROID_CORRECTION_RATE * delta);
     const float playerBlend = 1.0f - expf(-PLAYER_CORRECTION_RATE * delta);
 
@@ -631,13 +734,17 @@ void NetClient::NetUpdate(double now, float delta)
     }
 }
 
-void NetClient::SendProjectile(Vector3 position, Vector3 velocity)
+void NetClient::SendVolley(Vector3 position, Vector3 forward, Vector3 up, int volleyIndex)
 {
-    ProjectilePacket buffer = {};
-    buffer.Command = NetworkCommands::FireProjectile;
+    VolleyPacket buffer = {};
+    buffer.Command = NetworkCommands::FireVolley;
     buffer.PlayerID = LocalPlayerId;
     buffer.Position = position;
-    buffer.Velocity = velocity;
+    buffer.Forward = forward;
+    buffer.Up = up;
+    buffer.VolleyIndex = (uint8_t)(volleyIndex & 0xFF);
 
+    // Speed, size, range and weapon are all stamped by the server from our build
+    // before it passes this on, so there is no point filling them in here.
     SendPacket(&buffer, sizeof(buffer));
 }

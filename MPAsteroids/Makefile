@@ -98,17 +98,20 @@ WEB_SOURCE_FILES = \
     src/Sounds.cpp \
     src/World.cpp \
     src/Entity.cpp \
-    src/NetClient.cpp
+    src/NetClient.cpp \
+    src/Upgrades.cpp \
+    src/UpgradeUI.cpp
 
 SERVER_SOURCE_FILES = \
     src/server_main.cpp \
     src/ServerHost.cpp \
-    src/WebSocketServer.cpp
+    src/WebSocketServer.cpp \
+    src/Upgrades.cpp
 
 # Native server toolchain
 #------------------------------------------------------------------------------------------------
 SERVER_CC      ?= g++
-SERVER_CFLAGS   = -Wall -std=c++17 -O2 $(SERVER_DEFINES)
+SERVER_CFLAGS   = -Wall -std=c++17 -O2 $(SERVER_DEFINES) $(EXTRA_SERVER_DEFINES)
 SERVER_INCLUDES = -I. -Isrc/include -Isrc/include/raylib -Isrc/include/networking
 SERVER_LDLIBS   =
 

@@ -12,9 +12,8 @@
 // lower; the spare room is there so a burst of splits always has space.
 #define MAX_ASTEROIDS 256
 
-// The play area is a set of cubes this wide. Each player switches on the eight
-// that meet at the grid corner nearest them, so they always have world around
-// them rather than standing on its edge. Go somewhere new and more switch on.
+// The play area is a set of cubes this wide, switching on around each player, so
+// going somewhere new switches more on.
 #define REGION_CELL_SIZE 35.0f
 
 // Cells switch off again after this long with nobody inside, which keeps the
@@ -24,9 +23,8 @@
 // Ceiling on how many cubes can be switched on at once.
 #define MAX_REGION_CELLS 64
 
-// Asteroids per cube, so the field stays as dense when the world is large as it
-// is when everyone is together. Set the total ceiling low enough to keep the
-// broadcast small.
+// Asteroids per cube, so the field stays as dense however large the world grows.
+// The total ceiling is low enough to keep the broadcast small.
 #define ASTEROID_PER_CELL 5
 #define ASTEROID_MAX_TOTAL 160
 
@@ -42,26 +40,28 @@
 // relocate distance, so nothing vanishes while it is still worth looking at.
 #define ASTEROID_DRAW_DISTANCE 85.0f
 
-// Players appear roughly this far out from the centre, spread around it,
-// instead of all stacked on the same spot in the middle. Wide enough that
-// respawning does not drop anyone back into the fight they just lost: a shot
-// covers thirty units a second, so distance here buys time.
-//
-// Going further just switches on more of the world, so there is no need to keep
-// this inside any particular boundary.
+// How far out players appear, spread around the centre rather than stacked on it.
+// Far enough that a respawn does not drop you back into the fight you just lost.
 #define PLAYER_SPAWN_RADIUS 50.0f
 
 #define MAX_SQR_V3 3.402823466e+38F
-// Includes the terminator, so names are this minus one character. Sized to fit
-// the longest adjective-and-noun pair in resources/names.txt with room to spare.
-// It is a field in PlayerPacket and ScoreboardPacket, so changing it changes the
-// wire format: server and client have to be rebuilt together.
+// Includes the terminator. It is a field in PlayerPacket, so changing it changes
+// the wire format and both halves have to be rebuilt together.
 #define MAX_PLAYER_NAME_LENGTH 32
 
 // The smallest piece worth making. An asteroid shatters instead of splitting
 // once shrinking it by ASTEROID_SPLIT_FACTOR would take it below this.
 #define MIN_ASTEROID_SCALE 0.45f
 #define ASTEROID_SPLIT_FACTOR 0.68f
+
+// A rock's hull, from its size. Squared because a rock is an area, not a length:
+// four shots for the biggest that spawns, one for most fragments.
+#define ASTEROID_HEALTH_PER_AREA 190.0f
+
+inline float AsteroidHealthForScale(float scale)
+{
+    return ASTEROID_HEALTH_PER_AREA * scale * scale;
+}
 
 // Port the server binds. Behind a reverse proxy this stays private to the host.
 #ifndef SERVER_PORT
@@ -86,15 +86,23 @@
 // Players past this are still scored, just not all listed at once.
 #define LEADERBOARD_VISIBLE_ROWS 8
 
-// Players report their position twenty times a second, so this much silence
-// means their client has stopped running frames: a backgrounded browser tab, or
-// a connection that has dropped without the socket noticing yet. Their ship is
-// left behind at its last position, and must not be treated as a live target.
+// Players report in twenty times a second, so this much silence means their
+// client has stopped running frames. Their ship is not a live target.
 #define PLAYER_STALE_SECONDS 2.0
 
 // How long after a kill that player cannot be killed again. Without it a ship
 // that is not running frames, and so never respawns, can be shot over and over.
 #define KILL_COOLDOWN_SECONDS 3.0
+
+// Levelling stops here. Reaching it takes long enough that the cap is a
+// formality rather than something a session runs into.
+#define MAX_LEVEL 30
+
+// One pick per level, so the history can never outgrow the level cap.
+#define MAX_UPGRADE_PICKS MAX_LEVEL
+
+// Cards shown at a level up. Bound to the 1, 2 and 3 keys.
+#define UPGRADE_OFFER_COUNT 3
 
 enum NetworkCommands
 {
@@ -104,11 +112,19 @@ enum NetworkCommands
     UpdatePlayer = 4,
     UpdateInput = 5,
     UpdateAsteroid = 6,
-    DestroyAsteroid = 7,
+    HitAsteroid = 7,
     UpdateScoreboard = 8,
     ResetScoreboardId = 9,
-    FireProjectile = 10,
+    // Retired. One packet per round could not carry a thirty-round shotgun,
+    // which is what FireVolley replaced it with.
+    RetiredFireProjectile = 10,
     PlayerKilled = 11,
+    PlayerHit = 12,
+    AsteroidCollision = 13,
+    UpdateUpgrades = 14,
+    ChooseUpgrade = 15,
+    UpdateHealth = 16,
+    FireVolley = 17,
 };
 
 #pragma pack(push, 1)
@@ -121,11 +137,20 @@ struct PlayerPacket
     char Name[MAX_PLAYER_NAME_LENGTH];
     Vector3 Position;
     Matrix Rotation;
+
+    // Stamped by the server on the way out, ignored on the way in. This packet
+    // already goes to everyone twenty times a second, so it costs nothing extra.
+    float Health;
+    float MaxHealth;
+    uint8_t Level;
+
+    // Which chassis to draw. Weapon branches need nothing here: they are already
+    // plain to see in the shots themselves.
+    uint8_t Evolution;
 };
 
-// 36 bytes per asteroid in each packet. There is no rotation matrix on purpose:
-// the client works the spin out from Seed instead, which costs one byte rather
-// than sixty-four and still has every player see the same rock turning.
+// 40 bytes per asteroid. No rotation matrix on purpose: the client works the spin
+// out from Seed, which costs one byte rather than sixty-four.
 struct AsteroidInfo
 {
     // Stable for an asteroid's whole life and never reused, so a recycled pool
@@ -136,6 +161,10 @@ struct AsteroidInfo
     Vector3 Position;
     Vector3 Velocity;
     float Scale;
+
+    // What is left of it. Sent because a rock no longer dies to the first thing
+    // that touches it.
+    float Health;
 };
 
 // Only the first AsteroidCount entries are actually sent, so the packet varies
@@ -147,7 +176,9 @@ struct AsteroidInfoPacket
     AsteroidInfo Asteroids[MAX_ASTEROIDS];
 };
 
-struct AsteroidDestroyPacket
+// One round landing on one rock. The server reads the damage from the shooter's
+// own build rather than from here.
+struct AsteroidHitPacket
 {
     int Command;
     int PlayerID;
@@ -162,13 +193,8 @@ struct ScoreboardPacket
     int Id;
 };
 
-// Sent by the shooter, who tests the shot against the target exactly as it is
-// drawn on their screen, so a hit lands when it looks like it should. The victim
-// cannot judge this itself: a backgrounded browser tab stops rendering, and a
-// client that is not running frames is not running collision either.
-//
-// Travels both ways. The shooter fills in VictimId; the server fills in KillerId
-// from the connection and passes it on to the victim, who then respawns.
+// Sent by the shooter, who tests the shot exactly as it is drawn on their screen.
+// Travels both ways: the server fills in KillerId and passes it to the victim.
 struct PlayerKillPacket
 {
     int Command;
@@ -176,26 +202,92 @@ struct PlayerKillPacket
     int VictimId;
 };
 
-struct ProjectilePacket
+// One whole trigger pull, however many rounds it becomes. The same weapon, place
+// and volley number always give the same rounds, so only those have to travel.
+struct VolleyPacket
 {
     int Command;
     int PlayerID;
+
+    // Where the ship was and which way it faced. Two axes rather than a matrix:
+    // the third is their cross product.
     Vector3 Position;
-    Vector3 Velocity;
+    Vector3 Forward;
+    Vector3 Up;
+
+    // Stamped by the server from the shooter's build. A client says where it was
+    // pointing, not how fast or how large its rounds are.
+    float Speed;
+    float Radius;
+    float Lifetime;
+
+    // Which weapon to lay the pattern out from, and which pull this is. The volley
+    // number keeps an alternating pattern agreeing across machines.
+    uint8_t WeaponId;
+    uint8_t VolleyIndex;
+    uint8_t Padding[2];
 };
+
+// Sent by the shooter. The damage is not in here: the server looks it up from
+// the shooter's own build, so nobody can inflate what their guns do.
+struct PlayerHitPacket
+{
+    int Command;
+    int VictimId;
+};
+
+// Self-reported: we ran into a rock. Nobody gains by lying about being hurt, and
+// the victim is the only one running the collision test against its own hull.
+struct AsteroidCollisionPacket
+{
+    int Command;
+    uint32_t AsteroidId;
+};
+
+// One player's progress and build, sent only to them and only when it changes.
+// The offer travels with it because the server decides what is on the table.
+struct UpgradeStatePacket
+{
+    int Command;
+    int Xp;
+    int Level;
+    int PendingPicks;
+    int HistoryCount;
+    uint8_t Offered[UPGRADE_OFFER_COUNT];
+    uint8_t OfferCount;
+    uint8_t History[MAX_UPGRADE_PICKS];
+    uint8_t Padding[2];
+};
+
+// Our own hull. Position updates go to everyone except the player they describe,
+// so a ship would otherwise learn every hull in the game except its own.
+struct PlayerHealthPacket
+{
+    int Command;
+    float Health;
+    float MaxHealth;
+};
+
+// The player taking one of the three they were shown.
+struct UpgradeChoosePacket
+{
+    int Command;
+    uint8_t UpgradeId;
+    uint8_t Padding[3];
+};
+
 #pragma pack(pop)
 
 static_assert(ASTEROID_MAX_TOTAL <= MAX_ASTEROIDS, "asteroid field must fit the pool");
-static_assert(sizeof(AsteroidInfo) == 36, "AsteroidInfo is a wire format; update the size noted above");
+static_assert(sizeof(AsteroidInfo) == 40, "AsteroidInfo is a wire format; update the size noted above");
 
 inline size_t AsteroidPacketSize(int count)
 {
     return offsetof(AsteroidInfoPacket, Asteroids) + (size_t)count * sizeof(AsteroidInfo);
 }
 
-// Every packet starts with its command, so the type can be read straight off
-// instead of being guessed from the length. Callers still check the length
-// separately, against whatever that command should be carrying.
+// Every packet starts with its command, so the type is read rather than guessed
+// from the length. Callers still check the length separately.
 inline int PeekCommand(const void* data, size_t length)
 {
     if (length < sizeof(int))
