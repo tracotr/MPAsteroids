@@ -59,3 +59,6 @@ MPAsteroids/
     ├── Caddyfile               serves the client, proxies /ws to the server
     └── provision-server.sh     one-time host setup
 ```
+
+## AI Disclosure
+AI was used for a lot of the porting of the original c++ app, to the web app. It also created the system for the upgrades, as well as general optimizations.
