@@ -9,7 +9,7 @@ namespace
     // to reason about, and converted once here.
     constexpr float Deg(float degrees) { return degrees * 0.01745329252f; }
 
-    // A burst weapon fires its rounds this far apart unless it says otherwise.
+    // A burst weapon fires its lasers this far apart unless it says otherwise.
     // Short enough to read as one pull of the trigger rather than several.
     constexpr double BURST_GAP = 0.07;
 
@@ -24,7 +24,7 @@ namespace
         w.DamageScale = 0.75f;
         w.FireRateScale = 1.0f;
         w.Pattern.Shape = PatternShape::Fan;
-        w.Pattern.RoundsPerBurst = 2;
+        w.Pattern.LasersPerBurst = 2;
         w.Pattern.SpreadRadians = Deg(3.0f);
         return w;
     }();
@@ -36,7 +36,7 @@ namespace
         WeaponProfile w;
         w.DamageScale = 2.0f;
         w.FireRateScale = 0.4f;
-        w.ProjectileSpeedScale = 1.8f;
+        w.LaserSpeedScale = 1.8f;
         return w;
     }();
 
@@ -56,19 +56,19 @@ namespace
         w.DamageScale = 0.75f;
         w.FireRateScale = 1.0f;
         w.Pattern.Shape = PatternShape::Fan;
-        w.Pattern.RoundsPerBurst = 3;
+        w.Pattern.LasersPerBurst = 3;
         w.Pattern.SpreadRadians = Deg(14.0f);
         return w;
     }();
 
-    // Four rounds thrown outward from the hull rather than ahead of it, spaced
+    // Four lasers thrown outward from the health rather than ahead of it, spaced
     // as a plus: up, down, left, right.
     const WeaponProfile QuadProfile = []
     {
         WeaponProfile w;
         w.DamageScale = 1.2f;
         w.Pattern.Shape = PatternShape::Plus;
-        w.Pattern.RoundsPerBurst = 4;
+        w.Pattern.LasersPerBurst = 4;
         return w;
     }();
 
@@ -79,7 +79,7 @@ namespace
         WeaponProfile w;
         w.DamageScale = 2.5f;
         w.FireRateScale = 0.4f;
-        w.ProjectileSpeedScale = 2.0f;
+        w.LaserSpeedScale = 2.0f;
         w.HidesName = true;
         return w;
     }();
@@ -89,7 +89,7 @@ namespace
         WeaponProfile w;
         w.DamageScale = 1.75f;
         w.FireRateScale = 0.75f;
-        w.ProjectileSpeedScale = 1.5f;
+        w.LaserSpeedScale = 1.5f;
         w.Pattern.BurstCount = 2;
         w.Pattern.BurstInterval = BURST_GAP;
         return w;
@@ -101,8 +101,8 @@ namespace
     {
         WeaponProfile w;
         w.DamageScale = 3.0f;
-        w.ProjectileSpeedScale = 0.5f;
-        w.ProjectileSizeScale = 5.0f;
+        w.LaserSpeedScale = 0.5f;
+        w.LaserSizeScale = 5.0f;
         return w;
     }();
 
@@ -111,10 +111,10 @@ namespace
         WeaponProfile w;
         w.DamageScale = 0.2f;
         w.FireRateScale = 0.8f;
-        w.ProjectileSpeedScale = 1.3f;
-        w.ProjectileLifetimeScale = 0.3f;
+        w.LaserSpeedScale = 1.3f;
+        w.LaserLifetimeScale = 0.3f;
         w.Pattern.Shape = PatternShape::Scatter;
-        w.Pattern.RoundsPerBurst = 10;
+        w.Pattern.LasersPerBurst = 10;
         w.Pattern.SpreadRadians = Deg(12.0f);
         return w;
     }();
@@ -127,7 +127,7 @@ namespace
         w.DamageScale = 0.75f;
         w.FireRateScale = 1.5f;
         w.Pattern.Shape = PatternShape::Fan;
-        w.Pattern.RoundsPerBurst = 3;
+        w.Pattern.LasersPerBurst = 3;
         w.Pattern.SpreadRadians = Deg(6.0f);
         return w;
     }();
@@ -138,7 +138,7 @@ namespace
         w.DamageScale = 0.9f;
         w.FireRateScale = 1.2f;
         w.Pattern.Shape = PatternShape::Fan;
-        w.Pattern.RoundsPerBurst = 5;
+        w.Pattern.LasersPerBurst = 5;
         w.Pattern.SpreadRadians = Deg(22.0f);
         return w;
     }();
@@ -153,9 +153,9 @@ namespace
         w.DamageScale = 1.3f;
         w.FireRateScale = 1.25f;
         w.Pattern.Shape = PatternShape::Plus;
-        w.Pattern.RoundsPerBurst = 8;
+        w.Pattern.LasersPerBurst = 8;
 
-        // Eight rounds a pull, every other position on a sixteen-slot ring. The
+        // Eight lasers a pull, every other position on a sixteen-slot ring. The
         // next pull takes the ones this one skipped.
         w.Pattern.Alternates = Alternation::ByVolley;
         return w;
@@ -169,7 +169,7 @@ namespace
         w.DamageScale = 1.2f;
         w.FireRateScale = 1.3f;
         w.Pattern.Shape = PatternShape::FrontBack;
-        w.Pattern.RoundsPerBurst = 4;
+        w.Pattern.LasersPerBurst = 4;
         w.Pattern.SpreadRadians = Deg(20.0f);
 
         // Ahead on one pull, behind on the next. Visible across pulls without
@@ -185,7 +185,7 @@ namespace
         WeaponProfile w;
         w.DamageScale = 4.0f;
         w.FireRateScale = 0.4f;
-        w.ProjectileSpeedScale = 4.0f;
+        w.LaserSpeedScale = 4.0f;
         w.HidesName = true;
         return w;
     }();
@@ -195,7 +195,7 @@ namespace
         WeaponProfile w;
         w.DamageScale = 3.0f;
         w.FireRateScale = 0.4f;
-        w.ProjectileSpeedScale = 3.0f;
+        w.LaserSpeedScale = 3.0f;
         w.Homing = true;
         return w;
     }();
@@ -207,7 +207,7 @@ namespace
         WeaponProfile w;
         w.DamageScale = 1.65f;
         w.FireRateScale = 0.9f;
-        w.ProjectileSpeedScale = 1.75f;
+        w.LaserSpeedScale = 1.75f;
         w.Pattern.BurstCount = 3;
         w.Pattern.BurstInterval = BURST_GAP;
         return w;
@@ -218,7 +218,7 @@ namespace
         WeaponProfile w;
         w.DamageScale = 1.3f;
         w.FireRateScale = 0.5f;
-        w.ProjectileSpeedScale = 1.75f;
+        w.LaserSpeedScale = 1.75f;
         w.Pattern.BurstCount = 5;
         w.Pattern.BurstInterval = BURST_GAP;
         w.Pattern.BurstSizeStep = 1.25f;
@@ -231,18 +231,18 @@ namespace
     {
         WeaponProfile w;
         w.DamageScale = 5.0f;
-        w.ProjectileSpeedScale = 0.5f;
-        w.ProjectileSizeScale = 7.5f;
+        w.LaserSpeedScale = 0.5f;
+        w.LaserSizeScale = 7.5f;
         return w;
     }();
 
-    // A Big Boy round, then a second at half the damage and half the size.
+    // A Big Boy laser, then a second at half the damage and half the size.
     const WeaponProfile DoubleDipperProfile = []
     {
         WeaponProfile w;
         w.DamageScale = 3.0f;
-        w.ProjectileSpeedScale = 0.5f;
-        w.ProjectileSizeScale = 5.0f;
+        w.LaserSpeedScale = 0.5f;
+        w.LaserSizeScale = 5.0f;
         w.Pattern.BurstCount = 2;
         w.Pattern.BurstInterval = BURST_GAP;
         w.Pattern.BurstDamageStep = 0.5f;
@@ -257,24 +257,24 @@ namespace
         WeaponProfile w;
         w.DamageScale = 0.1f;
         w.FireRateScale = 0.5f;
-        w.ProjectileSpeedScale = 1.2f;
-        w.ProjectileLifetimeScale = 0.3f;
+        w.LaserSpeedScale = 1.2f;
+        w.LaserLifetimeScale = 0.3f;
         w.Pattern.Shape = PatternShape::Scatter;
-        w.Pattern.RoundsPerBurst = 30;
+        w.Pattern.LasersPerBurst = 30;
         w.Pattern.SpreadRadians = Deg(20.0f);
         return w;
     }();
 
-    // A shotgun off each side of the hull at once.
+    // A shotgun off each side of the health at once.
     const WeaponProfile DoubleBarreledProfile = []
     {
         WeaponProfile w;
         w.DamageScale = 0.2f;
         w.FireRateScale = 0.8f;
-        w.ProjectileSpeedScale = 1.3f;
-        w.ProjectileLifetimeScale = 0.3f;
+        w.LaserSpeedScale = 1.3f;
+        w.LaserLifetimeScale = 0.3f;
         w.Pattern.Shape = PatternShape::DualFan;
-        w.Pattern.RoundsPerBurst = 20;
+        w.Pattern.LasersPerBurst = 20;
         w.Pattern.SpreadRadians = Deg(12.0f);
         w.Pattern.MuzzleOffset = 1.2f;
         return w;
@@ -298,23 +298,23 @@ namespace
           5, 0, 0, 0,
           [](ShipStats& s, int rank) { s.FireCooldown *= powf(0.88f, (float)rank); }, nullptr },
 
-        { UPGRADE_HIGH_VELOCITY, "High Velocity", "+15% round speed",
+        { UPGRADE_HIGH_VELOCITY, "High Velocity", "+15% laser speed",
           5, 0, 0, 0,
-          [](ShipStats& s, int rank) { s.ProjectileSpeed *= 1.0f + 0.15f * rank; }, nullptr },
+          [](ShipStats& s, int rank) { s.LaserSpeed *= 1.0f + 0.15f * rank; }, nullptr },
 
         { UPGRADE_HEAVY_ROUNDS, "Heavy Rounds", "+18% size, +10% damage",
           5, 0, 0, 0,
           [](ShipStats& s, int rank)
           {
-              s.ProjectileRadius *= 1.0f + 0.18f * rank;
+              s.LaserRadius *= 1.0f + 0.18f * rank;
               s.Damage *= 1.0f + 0.10f * rank;
           }, nullptr },
 
         { UPGRADE_LONG_BARREL, "Long Barrel", "+20% range",
           5, 0, 0, 0,
-          [](ShipStats& s, int rank) { s.ProjectileLifetime *= 1.0f + 0.20f * rank; }, nullptr },
+          [](ShipStats& s, int rank) { s.LaserLifetime *= 1.0f + 0.20f * rank; }, nullptr },
 
-        { UPGRADE_HULL_PLATING, "Hull Plating", "+25 hull",
+        { UPGRADE_HULL_PLATING, "Hull Plating", "+25 health",
           5, 0, 0, 0,
           [](ShipStats& s, int rank) { s.MaxHealth += 25.0f * rank; }, nullptr },
 
@@ -326,13 +326,13 @@ namespace
           3, 0, 0, 0,
           [](ShipStats& s, int rank) { s.DamageTakenScale *= powf(0.7f, (float)rank); }, nullptr },
 
-        { UPGRADE_REPAIR_BAY, "Repair Bay", "+1.5 hull/sec",
+        { UPGRADE_REPAIR_BAY, "Repair Bay", "+1.5 health/sec",
           3, 0, 0, 0,
           [](ShipStats& s, int rank) { s.Regen += 1.5f * rank; }, nullptr },
 
         // --- tier one, level 10 ---
 
-        { UPGRADE_TWIN, "Twin", "2 rounds, 1x rate, 0.75x dmg",
+        { UPGRADE_TWIN, "Twin", "2 lasers, 1x rate, 0.75x dmg",
           1, 0, WEAPON_GROUP_TIER_ONE, 10, nullptr, &TwinProfile },
 
         { UPGRADE_SNIPER, "Sniper", "2x dmg, 0.4x rate, 1.8x speed",
@@ -343,60 +343,60 @@ namespace
 
         // --- tier two, level 20 ---
 
-        { UPGRADE_TRIPLE, "Triple Shot", "3 rounds in an arc, 1x rate, 0.75x dmg",
+        { UPGRADE_TRIPLE, "Triple Shot", "3 lasers in an arc, 1x rate, 0.75x dmg",
           1, UPGRADE_TWIN, WEAPON_GROUP_TIER_TWO, 20, nullptr, &TripleProfile },
 
-        { UPGRADE_QUAD, "Quad", "4 rounds around you, 1.2x dmg",
+        { UPGRADE_QUAD, "Quad", "4 lasers around you, 1.2x dmg",
           1, UPGRADE_TWIN, WEAPON_GROUP_TIER_TWO, 20, nullptr, &QuadProfile },
 
         { UPGRADE_ASSASSIN, "Assassin", "2.5x dmg, 0.4x rate, 2x speed, name hidden",
           1, UPGRADE_SNIPER, WEAPON_GROUP_TIER_TWO, 20, nullptr, &AssassinProfile },
 
-        { UPGRADE_DOUBLE_TAP, "Double-tap", "2-round burst, 1.75x dmg, 0.75x rate",
+        { UPGRADE_DOUBLE_TAP, "Double-tap", "2-laser burst, 1.75x dmg, 0.75x rate",
           1, UPGRADE_SNIPER, WEAPON_GROUP_TIER_TWO, 20, nullptr, &DoubleTapProfile },
 
         { UPGRADE_BIG_BOY, "Big Boy", "5x size, 0.5x speed, 3x dmg",
           1, UPGRADE_MACHINE_GUN, WEAPON_GROUP_TIER_TWO, 20, nullptr, &BigBoyProfile },
 
-        { UPGRADE_SHOTGUN, "Shotgun", "10 rounds, 0.2x dmg each, 1.3x speed",
+        { UPGRADE_SHOTGUN, "Shotgun", "10 lasers, 0.2x dmg each, 1.3x speed",
           1, UPGRADE_MACHINE_GUN, WEAPON_GROUP_TIER_TWO, 20, nullptr, &ShotgunProfile },
 
         // --- tier three, level 30 ---
 
-        { UPGRADE_TRIPLE_DIPPER, "Triple Dipper", "3 rounds, tight arc, 1.5x rate, 0.75x dmg",
+        { UPGRADE_TRIPLE_DIPPER, "Triple Dipper", "3 lasers, tight arc, 1.5x rate, 0.75x dmg",
           1, UPGRADE_TRIPLE, WEAPON_GROUP_TIER_THREE, 30, nullptr, &TripleDipperProfile },
 
-        { UPGRADE_QUINTUPLE_DIPPER, "Quintuple Dipper", "5 rounds spread, 1.2x rate, 0.9x dmg",
+        { UPGRADE_QUINTUPLE_DIPPER, "Quintuple Dipper", "5 lasers spread, 1.2x rate, 0.9x dmg",
           1, UPGRADE_TRIPLE, WEAPON_GROUP_TIER_THREE, 30, nullptr, &QuintupleDipperProfile },
 
-        { UPGRADE_NORTH_STAR, "North Star", "8 of 16 around you, alternating, 1.3x dmg",
+        { UPGRADE_NORTH_STAR, "North Star", "8 of 16 lasers around you, 1.3x dmg",
           1, UPGRADE_QUAD, WEAPON_GROUP_TIER_THREE, 30, nullptr, &NorthStarProfile },
 
-        { UPGRADE_SWITCHER, "Switcher", "4 ahead, then 4 behind, 1.2x dmg, 1.3x rate",
+        { UPGRADE_SWITCHER, "Switcher", "4 lasers ahead, then 4 behind, 1.2x dmg",
           1, UPGRADE_QUAD, WEAPON_GROUP_TIER_THREE, 30, nullptr, &SwitcherProfile },
 
         { UPGRADE_EVIL_BEING, "Evil Being", "4x dmg, 0.4x rate, 4x speed, name hidden",
           1, UPGRADE_ASSASSIN, WEAPON_GROUP_TIER_THREE, 30, nullptr, &EvilBeingProfile },
 
-        { UPGRADE_BIG_BEING, "Big Being", "3x dmg, 0.4x rate, 3x speed, rounds track",
+        { UPGRADE_BIG_BEING, "Big Being", "3x dmg, 0.4x rate, 3x speed, lasers track",
           1, UPGRADE_ASSASSIN, WEAPON_GROUP_TIER_THREE, 30, nullptr, &BigBeingProfile },
 
-        { UPGRADE_TRIPLE_TAP, "Triple Tap", "3-round burst, 1.65x dmg, 1.75x speed",
+        { UPGRADE_TRIPLE_TAP, "Triple Tap", "3-laser burst, 1.65x dmg, 1.75x speed",
           1, UPGRADE_DOUBLE_TAP, WEAPON_GROUP_TIER_THREE, 30, nullptr, &TripleTapProfile },
 
-        { UPGRADE_QUINTUPLE_TAP, "Quintuple Tap", "5-round burst, growing, 1.3x dmg",
+        { UPGRADE_QUINTUPLE_TAP, "Quintuple Tap", "5-laser burst, growing, 1.3x dmg",
           1, UPGRADE_DOUBLE_TAP, WEAPON_GROUP_TIER_THREE, 30, nullptr, &QuintupleTapProfile },
 
         { UPGRADE_BIGGEST_BOY, "Biggest Boy", "7.5x size, 0.5x speed, 5x dmg",
           1, UPGRADE_BIG_BOY, WEAPON_GROUP_TIER_THREE, 30, nullptr, &BiggestBoyProfile },
 
-        { UPGRADE_DOUBLE_DIPPER, "Double Dipper Big Bipper", "2-round burst, second at half",
+        { UPGRADE_DOUBLE_DIPPER, "Double Dipper Big Bipper", "2-laser burst, second at half",
           1, UPGRADE_BIG_BOY, WEAPON_GROUP_TIER_THREE, 30, nullptr, &DoubleDipperProfile },
 
-        { UPGRADE_SHOTTIER_GUN, "Shottier Gun", "30 rounds, 0.1x dmg each, 0.5x rate",
+        { UPGRADE_SHOTTIER_GUN, "Shottier Gun", "30 lasers, 0.1x dmg each, 0.5x rate",
           1, UPGRADE_SHOTGUN, WEAPON_GROUP_TIER_THREE, 30, nullptr, &ShottierGunProfile },
 
-        { UPGRADE_DOUBLE_BARRELED, "Double Barreled", "a shotgun off each side, 20 rounds",
+        { UPGRADE_DOUBLE_BARRELED, "Double Barreled", "a shotgun off each side, 20 lasers",
           1, UPGRADE_SHOTGUN, WEAPON_GROUP_TIER_THREE, 30, nullptr, &DoubleBarreledProfile },
     };
 
@@ -418,9 +418,9 @@ namespace
     void ApplyWeaponProfile(ShipStats& stats, const WeaponProfile& weapon)
     {
         stats.Damage = BASE_DAMAGE * weapon.DamageScale;
-        stats.ProjectileSpeed = BASE_PROJECTILE_SPEED * weapon.ProjectileSpeedScale;
-        stats.ProjectileRadius = BASE_PROJECTILE_RADIUS * weapon.ProjectileSizeScale;
-        stats.ProjectileLifetime = BASE_PROJECTILE_LIFETIME * weapon.ProjectileLifetimeScale;
+        stats.LaserSpeed = BASE_LASER_SPEED * weapon.LaserSpeedScale;
+        stats.LaserRadius = BASE_LASER_RADIUS * weapon.LaserSizeScale;
+        stats.LaserLifetime = BASE_LASER_LIFETIME * weapon.LaserLifetimeScale;
 
         const float rate = (weapon.FireRateScale > 0.0001f) ? weapon.FireRateScale : 0.0001f;
         stats.FireCooldown = BASE_FIRE_COOLDOWN / rate;
@@ -434,7 +434,7 @@ namespace
 namespace
 {
     // A direction on the disc facing the way the ship does, used to spread a cone
-    // of rounds around its nose.
+    // of lasers around its nose.
     Vector3 RadialDirection(const Vector3& right, const Vector3& up, float theta)
     {
         return Vector3Add(Vector3Scale(right, cosf(theta)), Vector3Scale(up, sinf(theta)));
@@ -455,7 +455,7 @@ namespace
                                            Vector3Scale(radial, sinf(spread))));
     }
 
-    // A settled value in nought to one, from the volley and round numbers rather
+    // A settled value in nought to one, from the volley and laser numbers rather
     // than a generator, because a shotgun cloud must look the same to everyone.
     float ScatterUnit(int volleyIndex, int roundIndex, uint32_t salt)
     {
@@ -468,7 +468,7 @@ namespace
         return (float)(h & 0xFFFFFFu) / (float)0xFFFFFFu;
     }
 
-    // A pellet somewhere inside the cone. The square root spreads them over the
+    // A laser somewhere inside the cone. The square root spreads them over the
     // area rather than bunching them into the middle.
     Vector3 ScatterDirection(const Vector3& forward, const Vector3& right, const Vector3& up,
                              int volleyIndex, int roundIndex, float spread)
@@ -494,7 +494,7 @@ namespace
 }
 
 int ExpandVolley(const ShipStats& stats, Vector3 origin, const Matrix& rotation,
-                 int volleyIndex, VolleyRound* out, int maxRounds)
+                 int volleyIndex, VolleyLaser* out, int maxRounds)
 {
     const FirePattern& pattern = stats.Pattern;
 
@@ -502,7 +502,7 @@ int ExpandVolley(const ShipStats& stats, Vector3 origin, const Matrix& rotation,
     const Vector3 up = Vector3Normalize(Vector3Transform((Vector3){ 0.0f, 1.0f, 0.0f }, rotation));
     const Vector3 right = Vector3Normalize(Vector3Transform((Vector3){ 1.0f, 0.0f, 0.0f }, rotation));
 
-    const int perBurst = pattern.RoundsPerBurst > 0 ? pattern.RoundsPerBurst : 1;
+    const int perBurst = pattern.LasersPerBurst > 0 ? pattern.LasersPerBurst : 1;
     const bool alternates = (pattern.Alternates != Alternation::None);
 
     int count = 0;
@@ -519,12 +519,12 @@ int ExpandVolley(const ShipStats& stats, Vector3 origin, const Matrix& rotation,
 
         for (int i = 0; i < perBurst && count < maxRounds; i++)
         {
-            VolleyRound& round = out[count++];
-            round.Origin = origin;
-            round.Direction = forward;
-            round.DamageScale = damageScale;
-            round.SizeScale = sizeScale;
-            round.BurstIndex = burst;
+            VolleyLaser& laser = out[count++];
+            laser.Origin = origin;
+            laser.Direction = forward;
+            laser.DamageScale = damageScale;
+            laser.SizeScale = sizeScale;
+            laser.BurstIndex = burst;
 
             switch (pattern.Shape)
             {
@@ -532,54 +532,54 @@ int ExpandVolley(const ShipStats& stats, Vector3 origin, const Matrix& rotation,
                     break;
 
                 case PatternShape::Fan:
-                    round.Direction = FanDirection(up, forward, i, perBurst, pattern.SpreadRadians);
+                    laser.Direction = FanDirection(up, forward, i, perBurst, pattern.SpreadRadians);
                     break;
 
                 case PatternShape::Scatter:
-                    round.Direction = ScatterDirection(forward, right, up, volleyIndex, i,
+                    laser.Direction = ScatterDirection(forward, right, up, volleyIndex, i,
                                                        pattern.SpreadRadians);
                     break;
 
                 case PatternShape::Ring:
                 {
                     const float theta = 2.0f * PI * (float)i / (float)perBurst;
-                    round.Direction = ConeDirection(forward, RadialDirection(right, up, theta),
+                    laser.Direction = ConeDirection(forward, RadialDirection(right, up, theta),
                                                     pattern.SpreadRadians);
                     break;
                 }
 
                 case PatternShape::Plus:
                 {
-                    // Out from the hull, around the plane the ship flies in, first
-                    // round down the nose. Alternating patterns have twice the slots.
+                    // Out from the health, around the plane the ship flies in, first
+                    // laser down the nose. Alternating patterns have twice the slots.
                     const int slots = alternates ? perBurst * 2 : perBurst;
                     const int slot = alternates ? (i * 2 + (flipped ? 1 : 0)) : i;
                     const float theta = 2.0f * PI * (float)slot / (float)slots;
-                    round.Direction = Vector3Normalize(HorizontalDirection(forward, right, theta));
+                    laser.Direction = Vector3Normalize(HorizontalDirection(forward, right, theta));
                     break;
                 }
 
                 case PatternShape::FrontBack:
                 {
                     const Vector3 centre = flipped ? Vector3Negate(forward) : forward;
-                    round.Direction = FanDirection(up, centre, i, perBurst, pattern.SpreadRadians);
+                    laser.Direction = FanDirection(up, centre, i, perBurst, pattern.SpreadRadians);
                     break;
                 }
 
                 case PatternShape::DualFan:
                 {
-                    // Two identical groups, one off each side of the hull.
+                    // Two identical groups, one off each side of the health.
                     const int half = perBurst > 1 ? perBurst / 2 : 1;
                     const bool leftSide = (i >= half);
                     const int inGroup = leftSide ? (i - half) : i;
 
-                    round.Origin = Vector3Add(origin,
+                    laser.Origin = Vector3Add(origin,
                                               Vector3Scale(right, leftSide ? -pattern.MuzzleOffset
                                                                            : pattern.MuzzleOffset));
 
-                    // Each barrel scatters independently: the round number is
+                    // Each barrel scatters independently: the laser number is
                     // offset by the side so the two clouds are not copies.
-                    round.Direction = ScatterDirection(forward, right, up, volleyIndex,
+                    laser.Direction = ScatterDirection(forward, right, up, volleyIndex,
                                                        inGroup + (leftSide ? 512 : 0),
                                                        pattern.SpreadRadians);
                     break;
@@ -695,9 +695,9 @@ void UpgradeState::Recompute()
             Catalog[i].Apply(stats, rank);
     }
 
-    if (stats.Pattern.RoundsPerBurst < 1) stats.Pattern.RoundsPerBurst = 1;
+    if (stats.Pattern.LasersPerBurst < 1) stats.Pattern.LasersPerBurst = 1;
     if (stats.Pattern.BurstCount < 1) stats.Pattern.BurstCount = 1;
-    stats.RoundsPerTriggerPull = stats.Pattern.RoundsPerBurst * stats.Pattern.BurstCount;
+    stats.LasersPerTriggerPull = stats.Pattern.LasersPerBurst * stats.Pattern.BurstCount;
 
     if (stats.MaxHealth < 1.0f) stats.MaxHealth = 1.0f;
     if (stats.FireCooldown < 0.02) stats.FireCooldown = 0.02;

@@ -39,16 +39,16 @@ void World::Update(double delta)
     }
 
     // Volleys that arrived since the last frame, laid out here rather than sent
-    // round by round.
+    // laser by laser.
     for (int i = 0; i < Net.RemoteVolleyCount; i++)
         SpawnRemoteVolley(Net.RemoteVolleyQueue[i], (float)Net.QueuedVolleyAge(i));
     Net.RemoteVolleyCount = 0;
     
-    // Before the projectiles move, so a burst round that came due this frame
+    // Before the lasers move, so a burst laser that came due this frame
     // travels the same distance as one fired at the top of it.
-    UpdatePendingRounds(GetTime());
+    UpdatePendingLasers(GetTime());
 
-    UpdateProjectiles(delta);
+    UpdateLasers(delta);
     
     Net.UpdateLocalPlayer(PlayerShip.Position, PlayerShip.Rotation);
     Net.NetUpdate(GetTime(), delta);
@@ -79,7 +79,7 @@ void World::Draw()
     PlayerShip.Draw();
     DrawPlayerModels();
     DrawAsteroidModels();
-    DrawProjectiles();
+    DrawLasers();
 }
 
 void World::DrawUI()
@@ -185,7 +185,7 @@ void World::DrawPlayerIndicators(const PlayerIndicator* otherPlayersData, int ot
                      (int)(screenPos.x - 15), (int)(screenPos.y - 28), 10, LIGHTGRAY);
 
             // Only over someone with enough plating to survive more than one
-            // shot; a full bar over every ship would say the same thing each time.
+            // laser; a full bar over every ship would say the same thing each time.
             const float maxHealth = otherPlayersData[i].maxHealth;
             if (maxHealth > 100.0f)
             {
@@ -200,27 +200,27 @@ void World::DrawPlayerIndicators(const PlayerIndicator* otherPlayersData, int ot
     }
 }
 
-// Bends a tracking round toward whatever is worth hitting near it. Ships first,
-// or a round that locked onto the nearest boulder would never reach anybody.
-void World::SteerHomingRound(Projectile& round, double delta)
+// Bends a tracking laser toward whatever is worth hitting near it. Ships first,
+// or a laser that locked onto the nearest boulder would never reach anybody.
+void World::SteerHomingLaser(Laser& laser, double delta)
 {
     NetClient& Net = GameApp::GetInstance()->GetNet();
 
-    const float speed = Vector3Length(round.velocity);
+    const float speed = Vector3Length(laser.velocity);
     if (speed < 0.0001f)
         return;
 
-    const Vector3 heading = Vector3Scale(round.velocity, 1.0f / speed);
+    const Vector3 heading = Vector3Scale(laser.velocity, 1.0f / speed);
 
     Vector3 target = { 0.0f, 0.0f, 0.0f };
-    float bestDistanceSq = PROJECTILE_HOMING_RANGE * PROJECTILE_HOMING_RANGE;
+    float bestDistanceSq = LASER_HOMING_RANGE * LASER_HOMING_RANGE;
     bool found = false;
 
-    // Only things ahead of the round are worth turning toward; anything behind it
+    // Only things ahead of the laser are worth turning toward; anything behind it
     // is already missed, and chasing it would look like a guided missile.
     auto consider = [&](Vector3 position)
     {
-        const Vector3 toTarget = Vector3Subtract(position, round.position);
+        const Vector3 toTarget = Vector3Subtract(position, laser.position);
         const float distanceSq = Vector3LengthSqr(toTarget);
 
         if (distanceSq > bestDistanceSq || distanceSq < 0.0001f)
@@ -236,7 +236,7 @@ void World::SteerHomingRound(Projectile& round, double delta)
 
     for (int i = 0; i < MAX_PLAYERS; i++)
     {
-        if (i == round.ownerId)
+        if (i == laser.ownerId)
             continue;
 
         Vector3 position = { 0.0f, 0.0f, 0.0f };
@@ -258,18 +258,18 @@ void World::SteerHomingRound(Projectile& round, double delta)
     if (!found)
         return;
 
-    const Vector3 desired = Vector3Normalize(Vector3Subtract(target, round.position));
+    const Vector3 desired = Vector3Normalize(Vector3Subtract(target, laser.position));
 
     float dot = Vector3DotProduct(heading, desired);
     if (dot > 1.0f) dot = 1.0f;
     if (dot < -1.0f) dot = -1.0f;
 
     const float angle = acosf(dot);
-    const float maxTurn = PROJECTILE_HOMING_TURN_RATE * (float)delta;
+    const float maxTurn = LASER_HOMING_TURN_RATE * (float)delta;
 
     if (angle <= maxTurn)
     {
-        round.velocity = Vector3Scale(desired, speed);
+        laser.velocity = Vector3Scale(desired, speed);
         return;
     }
 
@@ -278,117 +278,117 @@ void World::SteerHomingRound(Projectile& round, double delta)
         return;
 
     axis = Vector3Normalize(axis);
-    round.velocity = Vector3Scale(Vector3Transform(heading, MatrixRotate(axis, maxTurn)), speed);
+    laser.velocity = Vector3Scale(Vector3Transform(heading, MatrixRotate(axis, maxTurn)), speed);
 }
 
-void World::UpdateProjectiles(double delta)
+void World::UpdateLasers(double delta)
 {
     int highest = 0;
 
-    for (int i = 0; i < ProjectileHighWater; i++)
+    for (int i = 0; i < LaserHighWater; i++)
     {
-        if (!Projectiles[i].active)
+        if (!Lasers[i].active)
             continue;
 
-        // Steered before it moves, so the round travels this frame along the
+        // Steered before it moves, so the laser travels this frame along the
         // heading it just turned onto rather than the one it had last frame.
-        if (Projectiles[i].homing)
-            SteerHomingRound(Projectiles[i], delta);
+        if (Lasers[i].homing)
+            SteerHomingLaser(Lasers[i], delta);
 
-        Projectiles[i].previousPosition = Projectiles[i].position;
-        Projectiles[i].position = Vector3Add(Projectiles[i].position, Vector3Scale(Projectiles[i].velocity, delta));
-        Projectiles[i].lifeTime -= delta;
+        Lasers[i].previousPosition = Lasers[i].position;
+        Lasers[i].position = Vector3Add(Lasers[i].position, Vector3Scale(Lasers[i].velocity, delta));
+        Lasers[i].lifeTime -= delta;
 
-        if (Projectiles[i].lifeTime <= 0.0f)
-            Projectiles[i].active = false;
+        if (Lasers[i].lifeTime <= 0.0f)
+            Lasers[i].active = false;
         else
             highest = i + 1;
     }
 
-    // Pulled back in as rounds expire, so a quiet moment after a shotgun volley
+    // Pulled back in as lasers expire, so a quiet moment after a shotgun volley
     // costs what a quiet moment should.
-    ProjectileHighWater = highest;
+    LaserHighWater = highest;
 }
 
-void World::FireProjectile(Vector3 position, Vector3 velocity, int ownerId, float lifeTime,
+void World::FireLaser(Vector3 position, Vector3 velocity, int ownerId, float lifeTime,
                            float radius, int pierce, float damage, bool homing)
 {
     NetClient& Net = GameApp::GetInstance()->GetNet();
 
-    // Our own rounds may take any slot; everyone else's start past the reserve.
-    // A lobby firing shotguns fills this pool fast, and our shot must not be lost.
+    // Our own lasers may take any slot; everyone else's start past the reserve.
+    // A lobby firing shotguns fills this pool fast, and our laser must not be lost.
     const bool isLocal = (ownerId == Net.GetLocalPlayerId());
-    const int firstSlot = isLocal ? 0 : LOCAL_PROJECTILE_RESERVE;
+    const int firstSlot = isLocal ? 0 : LOCAL_LASER_RESERVE;
 
-    for (int i = firstSlot; i < MAX_PROJECTILES; i++)
+    for (int i = firstSlot; i < MAX_LASERS; i++)
     {
-        if (!Projectiles[i].active)
+        if (!Lasers[i].active)
         {
-            Projectiles[i].active = true;
-            Projectiles[i].ownerId = ownerId;
-            Projectiles[i].position = position;
-            Projectiles[i].previousPosition = position;
-            Projectiles[i].velocity = velocity;
-            Projectiles[i].lifeTime = lifeTime;
-            Projectiles[i].radius = radius;
-            Projectiles[i].pierceLeft = pierce;
-            Projectiles[i].damage = damage;
-            Projectiles[i].homing = homing;
+            Lasers[i].active = true;
+            Lasers[i].ownerId = ownerId;
+            Lasers[i].position = position;
+            Lasers[i].previousPosition = position;
+            Lasers[i].velocity = velocity;
+            Lasers[i].lifeTime = lifeTime;
+            Lasers[i].radius = radius;
+            Lasers[i].pierceLeft = pierce;
+            Lasers[i].damage = damage;
+            Lasers[i].homing = homing;
 
-            if (i + 1 > ProjectileHighWater)
-                ProjectileHighWater = i + 1;
+            if (i + 1 > LaserHighWater)
+                LaserHighWater = i + 1;
             break;
         }
     }
 }
 
-// Where the rounds go is decided by the shared pattern code, so everyone lays a
-// volley out the same way. This only turns that layout into projectiles.
+// Where the lasers go is decided by the shared pattern code, so everyone lays a
+// volley out the same way. This only turns that layout into lasers.
 void World::FireVolley(Vector3 origin, const Matrix& rotation, const ShipStats& stats, int ownerId)
 {
     NetClient& Net = GameApp::GetInstance()->GetNet();
 
-    VolleyRound rounds[MAX_VOLLEY_ROUNDS];
-    const int count = ExpandVolley(stats, origin, rotation, LocalVolleyIndex, rounds, MAX_VOLLEY_ROUNDS);
+    VolleyLaser lasers[MAX_VOLLEY_LASERS];
+    const int count = ExpandVolley(stats, origin, rotation, LocalVolleyIndex, lasers, MAX_VOLLEY_LASERS);
 
     // One message for the whole pull. Everyone receiving it walks the same pattern
-    // to the same rounds, so thirty pellets cost what one used to.
+    // to the same lasers, so thirty lasers cost what one used to.
     Net.SendVolley(origin,
                    Vector3Normalize(Vector3Transform((Vector3){ 0.0f, 0.0f, -1.0f }, rotation)),
                    Vector3Normalize(Vector3Transform((Vector3){ 0.0f, 1.0f, 0.0f }, rotation)),
                    LocalVolleyIndex);
 
-    // Counted per pull, not per round: an alternating weapon swaps halves once a
-    // trigger pull, however many rounds that pull turned out to be.
+    // Counted per pull, not per laser: an alternating weapon swaps halves once a
+    // trigger pull, however many lasers that pull turned out to be.
     LocalVolleyIndex++;
 
     const double now = GetTime();
 
     for (int i = 0; i < count; i++)
     {
-        const VolleyRound& round = rounds[i];
+        const VolleyLaser& laser = lasers[i];
 
-        const Vector3 velocity = Vector3Scale(round.Direction, stats.ProjectileSpeed);
-        const float radius = stats.ProjectileRadius * round.SizeScale;
-        const float damage = stats.Damage * round.DamageScale;
+        const Vector3 velocity = Vector3Scale(laser.Direction, stats.LaserSpeed);
+        const float radius = stats.LaserRadius * laser.SizeScale;
+        const float damage = stats.Damage * laser.DamageScale;
 
         // The first burst leaves now; the rest wait their turn.
-        if (round.BurstIndex == 0)
-            ReleaseRound(round.Origin, velocity, ownerId, stats.ProjectileLifetime, radius,
+        if (laser.BurstIndex == 0)
+            ReleaseLaser(laser.Origin, velocity, ownerId, stats.LaserLifetime, radius,
                          stats.Pierce, damage, stats.Homing);
         else
-            QueueRound(now + round.BurstIndex * stats.Pattern.BurstInterval,
-                       round.Origin, velocity, ownerId, stats.ProjectileLifetime, radius,
+            QueueLaser(now + laser.BurstIndex * stats.Pattern.BurstInterval,
+                       laser.Origin, velocity, ownerId, stats.LaserLifetime, radius,
                        stats.Pierce, damage, stats.Homing);
     }
 }
 
-// Fires one round. Nothing is sent from here: the whole pull was described once
+// Fires one laser. Nothing is sent from here: the whole pull was described once
 // when the trigger went down, so this is purely a local event.
-void World::ReleaseRound(Vector3 origin, Vector3 velocity, int ownerId, float lifeTime,
+void World::ReleaseLaser(Vector3 origin, Vector3 velocity, int ownerId, float lifeTime,
                          float radius, int pierce, float damage, bool homing)
 {
-    FireProjectile(origin, velocity, ownerId, lifeTime, radius, pierce, damage, homing);
+    FireLaser(origin, velocity, ownerId, lifeTime, radius, pierce, damage, homing);
 }
 
 // Rebuilds a rotation from the two axes a volley carries. The model's own
@@ -412,7 +412,7 @@ static Matrix RotationFromAxes(Vector3 forward, Vector3 up)
     return result;
 }
 
-// Turns somebody else's trigger pull back into rounds. Age is how long the packet
+// Turns somebody else's trigger pull back into lasers. Age is how long the packet
 // took to arrive: a burst already due is caught up, one still ahead waits.
 void World::SpawnRemoteVolley(const NetClient::RemoteVolleyEvent& volley, float age)
 {
@@ -430,90 +430,90 @@ void World::SpawnRemoteVolley(const NetClient::RemoteVolleyEvent& volley, float 
 
     const Matrix rotation = RotationFromAxes(volley.Forward, volley.Up);
 
-    VolleyRound rounds[MAX_VOLLEY_ROUNDS];
+    VolleyLaser lasers[MAX_VOLLEY_LASERS];
     const int count = ExpandVolley(stats, volley.Position, rotation, volley.VolleyIndex,
-                                   rounds, MAX_VOLLEY_ROUNDS);
+                                   lasers, MAX_VOLLEY_LASERS);
 
     const double now = GetTime();
 
     for (int i = 0; i < count; i++)
     {
-        const VolleyRound& round = rounds[i];
+        const VolleyLaser& laser = lasers[i];
 
-        const Vector3 velocity = Vector3Scale(round.Direction, volley.Speed);
-        const float radius = volley.Radius * round.SizeScale;
-        const float sinceFired = age - (float)(round.BurstIndex * stats.Pattern.BurstInterval);
+        const Vector3 velocity = Vector3Scale(laser.Direction, volley.Speed);
+        const float radius = volley.Radius * laser.SizeScale;
+        const float sinceFired = age - (float)(laser.BurstIndex * stats.Pattern.BurstInterval);
 
         if (sinceFired >= volley.Lifetime)
             continue;
 
         if (sinceFired < 0.0f)
         {
-            QueueRound(now - sinceFired, round.Origin, velocity, volley.PlayerId,
+            QueueLaser(now - sinceFired, laser.Origin, velocity, volley.PlayerId,
                        volley.Lifetime, radius, 0, BASE_DAMAGE, stats.Homing);
             continue;
         }
 
-        FireProjectile(Vector3Add(round.Origin, Vector3Scale(velocity, sinceFired)),
+        FireLaser(Vector3Add(laser.Origin, Vector3Scale(velocity, sinceFired)),
                        velocity, volley.PlayerId, volley.Lifetime - sinceFired, radius,
                        0, BASE_DAMAGE, stats.Homing);
     }
 }
 
-void World::QueueRound(double dueTime, Vector3 origin, Vector3 velocity, int ownerId,
+void World::QueueLaser(double dueTime, Vector3 origin, Vector3 velocity, int ownerId,
                        float lifeTime, float radius, int pierce, float damage, bool homing)
 {
-    for (int i = 0; i < MAX_PENDING_ROUNDS; i++)
+    for (int i = 0; i < MAX_PENDING_LASERS; i++)
     {
-        if (PendingRounds[i].active)
+        if (PendingLasers[i].active)
             continue;
 
-        PendingRounds[i].active = true;
-        PendingRounds[i].dueTime = dueTime;
-        PendingRounds[i].origin = origin;
-        PendingRounds[i].velocity = velocity;
-        PendingRounds[i].ownerId = ownerId;
-        PendingRounds[i].lifeTime = lifeTime;
-        PendingRounds[i].radius = radius;
-        PendingRounds[i].pierce = pierce;
-        PendingRounds[i].damage = damage;
-        PendingRounds[i].homing = homing;
+        PendingLasers[i].active = true;
+        PendingLasers[i].dueTime = dueTime;
+        PendingLasers[i].origin = origin;
+        PendingLasers[i].velocity = velocity;
+        PendingLasers[i].ownerId = ownerId;
+        PendingLasers[i].lifeTime = lifeTime;
+        PendingLasers[i].radius = radius;
+        PendingLasers[i].pierce = pierce;
+        PendingLasers[i].damage = damage;
+        PendingLasers[i].homing = homing;
         return;
     }
 }
 
-void World::UpdatePendingRounds(double now)
+void World::UpdatePendingLasers(double now)
 {
-    for (int i = 0; i < MAX_PENDING_ROUNDS; i++)
+    for (int i = 0; i < MAX_PENDING_LASERS; i++)
     {
-        if (!PendingRounds[i].active || now < PendingRounds[i].dueTime)
+        if (!PendingLasers[i].active || now < PendingLasers[i].dueTime)
             continue;
 
-        PendingRounds[i].active = false;
-        ReleaseRound(PendingRounds[i].origin, PendingRounds[i].velocity, PendingRounds[i].ownerId,
-                     PendingRounds[i].lifeTime, PendingRounds[i].radius,
-                     PendingRounds[i].pierce, PendingRounds[i].damage, PendingRounds[i].homing);
+        PendingLasers[i].active = false;
+        ReleaseLaser(PendingLasers[i].origin, PendingLasers[i].velocity, PendingLasers[i].ownerId,
+                     PendingLasers[i].lifeTime, PendingLasers[i].radius,
+                     PendingLasers[i].pierce, PendingLasers[i].damage, PendingLasers[i].homing);
     }
 }
 
-void World::DrawProjectiles()
+void World::DrawLasers()
 {
     Camera3D camera = GameApp::GetInstance()->GetCamera();
 
-    for (int i = 0; i < ProjectileHighWater; i++)
+    for (int i = 0; i < LaserHighWater; i++)
     {
-        if (!Projectiles[i].active)
+        if (!Lasers[i].active)
             continue;
 
         // Nothing this small is worth drawing from the far side of the world,
         // and the wide weapons put a lot of very small things in the air at once.
-        if (Vector3DistanceSqr(camera.position, Projectiles[i].position) >
-            PROJECTILE_DRAW_DISTANCE * PROJECTILE_DRAW_DISTANCE)
+        if (Vector3DistanceSqr(camera.position, Lasers[i].position) >
+            LASER_DRAW_DISTANCE * LASER_DRAW_DISTANCE)
             continue;
 
         // Coarse on purpose. DrawSphere builds a sixteen-by-sixteen mesh a call,
-        // which with a hundred rounds in the air was most of a frame.
-        DrawSphereEx(Projectiles[i].position, Projectiles[i].radius * PROJECTILE_DRAW_RATIO,
+        // which with a hundred lasers in the air was most of a frame.
+        DrawSphereEx(Lasers[i].position, Lasers[i].radius * LASER_DRAW_RATIO,
                      4, 6, WHITE);
     }
 }
@@ -553,8 +553,8 @@ static Vector3 ToLocalSpace(Vector3 worldPoint, Vector3 origin, const Matrix& ro
     return Vector3Transform(Vector3Subtract(worldPoint, origin), MatrixTranspose(rotation));
 }
 
-// How many points to test along one frame of travel, stepped by the round's own
-// width. Testing only where it ended up would let a fast shot step over a ship.
+// How many points to test along one frame of travel, stepped by the laser's own
+// width. Testing only where it ended up would let a fast laser step over a ship.
 static int SweepSamples(Vector3 from, Vector3 to, float radius)
 {
     const int MAX_SAMPLES = 12;
@@ -564,18 +564,18 @@ static int SweepSamples(Vector3 from, Vector3 to, float radius)
     return samples > MAX_SAMPLES ? MAX_SAMPLES : samples;
 }
 
-void World::CheckProjectileCollisions()
+void World::CheckLaserCollisions()
 {
     Player& PlayerShip = GameApp::GetInstance()->GetPlayer();
     NetClient& Net = GameApp::GetInstance()->GetNet();
 
     const int localId = Net.GetLocalPlayerId();
 
-    for (int p = 0; p < ProjectileHighWater; p++)
+    for (int p = 0; p < LaserHighWater; p++)
     {
-        if (!Projectiles[p].active) continue;
+        if (!Lasers[p].active) continue;
 
-        const float radius = Projectiles[p].radius;
+        const float radius = Lasers[p].radius;
 
         for (int a = 0; a < AsteroidFrameCount; a++)
         {
@@ -584,8 +584,8 @@ void World::CheckProjectileCollisions()
             // Cheap reject against the whole step, widened so nothing close is
             // thrown away before the sweep gets a look at it.
             float reach = frame.Radius + radius
-                        + Vector3Distance(Projectiles[p].previousPosition, Projectiles[p].position);
-            if (Vector3DistanceSqr(frame.Position, Projectiles[p].position) > reach * reach)
+                        + Vector3Distance(Lasers[p].previousPosition, Lasers[p].position);
+            if (Vector3DistanceSqr(frame.Position, Lasers[p].position) > reach * reach)
                 continue;
 
             // Exact: a sphere against the rock's own box, in the rock's space.
@@ -593,11 +593,11 @@ void World::CheckProjectileCollisions()
             body.min = Vector3Scale(body.min, frame.Scale);
             body.max = Vector3Scale(body.max, frame.Scale);
 
-            const int samples = SweepSamples(Projectiles[p].previousPosition, Projectiles[p].position, radius);
+            const int samples = SweepSamples(Lasers[p].previousPosition, Lasers[p].position, radius);
             bool hit = false;
             for (int step = 1; step <= samples && !hit; step++)
             {
-                Vector3 along = Vector3Lerp(Projectiles[p].previousPosition, Projectiles[p].position,
+                Vector3 along = Vector3Lerp(Lasers[p].previousPosition, Lasers[p].position,
                                             (float)step / (float)samples);
                 hit = CheckCollisionBoxSphere(body, ToLocalSpace(along, frame.Position, frame.Rotation),
                                               radius);
@@ -608,21 +608,21 @@ void World::CheckProjectileCollisions()
 
             Sounds::PlayExplosion(frame.Position, PlayerShip.Position);
 
-            // A piercing round carries on through and can break the next rock
+            // A piercing laser carries on through and can break the next rock
             // too; anything else stops here.
-            if (Projectiles[p].pierceLeft > 0)
-                Projectiles[p].pierceLeft--;
+            if (Lasers[p].pierceLeft > 0)
+                Lasers[p].pierceLeft--;
             else
-                Projectiles[p].active = false;
+                Lasers[p].active = false;
 
-            // Only our own shots are reported, or the first client to notice
-            // somebody else's would claim the rock. Their round still stops here.
+            // Only our own lasers are reported, or the first client to notice
+            // somebody else's would claim the rock. Their laser still stops here.
             bool finished = false;
-            if (Projectiles[p].ownerId == localId)
-                finished = Net.ReportAsteroidHit(frame.Id, Projectiles[p].damage);
+            if (Lasers[p].ownerId == localId)
+                finished = Net.ReportAsteroidHit(frame.Id, Lasers[p].damage);
 
             // A rock leaves this frame's list only once finished, or the rest of
-            // a volley would sail through what the first pellet just struck.
+            // a volley would sail through what the first laser just struck.
             if (finished)
                 AsteroidFrames[a] = AsteroidFrames[--AsteroidFrameCount];
             break;
@@ -662,7 +662,7 @@ bool World::CheckShipCollisions()
     return false;
 }
 
-// Our shots against everyone else's ships, judged by the shooter against the
+// Our lasers against everyone else's ships, judged by the shooter against the
 // positions it is drawing, so a hit lands when it looks like it should.
 bool World::CheckOutgoingFire()
 {
@@ -673,16 +673,16 @@ bool World::CheckOutgoingFire()
     if (localId < 0)
         return false;
 
-    for (int p = 0; p < ProjectileHighWater; p++)
+    for (int p = 0; p < LaserHighWater; p++)
     {
-        if (!Projectiles[p].active) continue;
+        if (!Lasers[p].active) continue;
 
-        // Only our own shots; everyone else scores their own.
-        if (Projectiles[p].ownerId != localId) continue;
+        // Only our own lasers; everyone else scores their own.
+        if (Lasers[p].ownerId != localId) continue;
 
-        const float radius = Projectiles[p].radius;
-        const float travel = Vector3Distance(Projectiles[p].previousPosition, Projectiles[p].position);
-        const int samples = SweepSamples(Projectiles[p].previousPosition, Projectiles[p].position, radius);
+        const float radius = Lasers[p].radius;
+        const float travel = Vector3Distance(Lasers[p].previousPosition, Lasers[p].position);
+        const int samples = SweepSamples(Lasers[p].previousPosition, Lasers[p].position, radius);
 
         for (int i = 0; i < MAX_PLAYERS; i++)
         {
@@ -699,13 +699,13 @@ bool World::CheckOutgoingFire()
                 continue;
 
             float reach = Models::ShipRadiusLocal + radius + travel;
-            if (Vector3DistanceSqr(targetPos, Projectiles[p].position) > reach * reach)
+            if (Vector3DistanceSqr(targetPos, Lasers[p].position) > reach * reach)
                 continue;
 
             bool hit = false;
             for (int step = 1; step <= samples && !hit; step++)
             {
-                Vector3 along = Vector3Lerp(Projectiles[p].previousPosition, Projectiles[p].position,
+                Vector3 along = Vector3Lerp(Lasers[p].previousPosition, Lasers[p].position,
                                             (float)step / (float)samples);
                 hit = CheckCollisionBoxSphere(Models::ShipBoxLocal,
                                               ToLocalSpace(along, targetPos, targetRot),
@@ -717,17 +717,17 @@ bool World::CheckOutgoingFire()
 
             Sounds::PlayExplosion(targetPos, PlayerShip.Position);
 
-            if (Projectiles[p].pierceLeft > 0)
-                Projectiles[p].pierceLeft--;
+            if (Lasers[p].pierceLeft > 0)
+                Lasers[p].pierceLeft--;
             else
-                Projectiles[p].active = false;
+                Lasers[p].active = false;
 
-            // The server takes the hull off them using our stored build, and ends
+            // The server takes the health off them using our stored build, and ends
             // their run only if that was the last of it.
             Net.ReportHit(i);
 
-            // One ship per round per frame. A piercing round gets the next on
-            // the frame after, so one shot cannot empty a formation in a step.
+            // One ship per laser per frame. A piercing laser gets the next on
+            // the frame after, so one laser cannot empty a formation in a step.
             return true;
         }
     }
@@ -741,7 +741,7 @@ void World::CheckCollisions()
     if (CheckShipCollisions()) return;
 
     CheckOutgoingFire();
-    CheckProjectileCollisions();
+    CheckLaserCollisions();
 }
 
 void World::DrawPlayerModels()

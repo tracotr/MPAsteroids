@@ -54,8 +54,8 @@
 #define MIN_ASTEROID_SCALE 0.45f
 #define ASTEROID_SPLIT_FACTOR 0.68f
 
-// A rock's hull, from its size. Squared because a rock is an area, not a length:
-// four shots for the biggest that spawns, one for most fragments.
+// A rock's health, from its size. Squared because a rock is an area, not a length:
+// four lasers for the biggest that spawns, one for most fragments.
 #define ASTEROID_HEALTH_PER_AREA 190.0f
 
 inline float AsteroidHealthForScale(float scale)
@@ -91,7 +91,7 @@ inline float AsteroidHealthForScale(float scale)
 #define PLAYER_STALE_SECONDS 2.0
 
 // How long after a kill that player cannot be killed again. Without it a ship
-// that is not running frames, and so never respawns, can be shot over and over.
+// that is not running frames, and so never respawns, can be laser over and over.
 #define KILL_COOLDOWN_SECONDS 3.0
 
 // Levelling stops here. Reaching it takes long enough that the cap is a
@@ -115,9 +115,9 @@ enum NetworkCommands
     HitAsteroid = 7,
     UpdateScoreboard = 8,
     ResetScoreboardId = 9,
-    // Retired. One packet per round could not carry a thirty-round shotgun,
+    // Retired. One packet per laser could not carry a thirty-laser shotgun,
     // which is what FireVolley replaced it with.
-    RetiredFireProjectile = 10,
+    RetiredFireLaser = 10,
     PlayerKilled = 11,
     PlayerHit = 12,
     AsteroidCollision = 13,
@@ -145,7 +145,7 @@ struct PlayerPacket
     uint8_t Level;
 
     // Which chassis to draw. Weapon branches need nothing here: they are already
-    // plain to see in the shots themselves.
+    // plain to see in the lasers themselves.
     uint8_t Evolution;
 };
 
@@ -176,7 +176,7 @@ struct AsteroidInfoPacket
     AsteroidInfo Asteroids[MAX_ASTEROIDS];
 };
 
-// One round landing on one rock. The server reads the damage from the shooter's
+// One laser landing on one rock. The server reads the damage from the shooter's
 // own build rather than from here.
 struct AsteroidHitPacket
 {
@@ -193,7 +193,7 @@ struct ScoreboardPacket
     int Id;
 };
 
-// Sent by the shooter, who tests the shot exactly as it is drawn on their screen.
+// Sent by the shooter, who tests the laser exactly as it is drawn on their screen.
 // Travels both ways: the server fills in KillerId and passes it to the victim.
 struct PlayerKillPacket
 {
@@ -202,8 +202,8 @@ struct PlayerKillPacket
     int VictimId;
 };
 
-// One whole trigger pull, however many rounds it becomes. The same weapon, place
-// and volley number always give the same rounds, so only those have to travel.
+// One whole trigger pull, however many lasers it becomes. The same weapon, place
+// and volley number always give the same lasers, so only those have to travel.
 struct VolleyPacket
 {
     int Command;
@@ -216,7 +216,7 @@ struct VolleyPacket
     Vector3 Up;
 
     // Stamped by the server from the shooter's build. A client says where it was
-    // pointing, not how fast or how large its rounds are.
+    // pointing, not how fast or how large its lasers are.
     float Speed;
     float Radius;
     float Lifetime;
@@ -237,7 +237,7 @@ struct PlayerHitPacket
 };
 
 // Self-reported: we ran into a rock. Nobody gains by lying about being hurt, and
-// the victim is the only one running the collision test against its own hull.
+// the victim is the only one running the collision test against its own health.
 struct AsteroidCollisionPacket
 {
     int Command;
@@ -259,8 +259,8 @@ struct UpgradeStatePacket
     uint8_t Padding[2];
 };
 
-// Our own hull. Position updates go to everyone except the player they describe,
-// so a ship would otherwise learn every hull in the game except its own.
+// Our own health. Position updates go to everyone except the player they describe,
+// so a ship would otherwise learn every health in the game except its own.
 struct PlayerHealthPacket
 {
     int Command;

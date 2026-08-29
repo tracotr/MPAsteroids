@@ -28,15 +28,15 @@
 #define XP_MULTIPLIER 1
 #endif
 
-// What a full-sized rock does to a hull it runs into. An unupgraded ship has a
+// What a full-sized rock does to a health it runs into. An unupgraded ship has a
 // hundred, so a big asteroid still ends a run exactly as it always did.
 #define ASTEROID_RAM_DAMAGE 130.0f
 
 // How many trigger pulls of credit a ship can bank. Timing the gap exactly would
-// throw a shot away every time a frame ran late.
+// throw a laser away every time a frame ran late.
 const float FIRE_BURST_VOLLEYS = 2.0f;
 
-// How often a regenerating hull tells its owner about it. Regen is gentle and the
+// How often a regenerating health tells its owner about it. Regen is gentle and the
 // bar moves slowly, so there is no reason to spend a packet every tick.
 const double HEALTH_REPORT_INTERVAL = 0.2;
 
@@ -68,7 +68,7 @@ struct ServerPlayer
     Matrix Rotation = MatrixIdentity();
     int Score = 0;
 
-    // The build and the hull it produces, both here rather than on the client: one
+    // The build and the health it produces, both here rather than on the client: one
     // that owned its own build could award itself anything, and never die.
     UpgradeState Upgrades;
     float Health = 100.0f;
@@ -82,15 +82,15 @@ struct ServerPlayer
     double LastInputTime = 0.0;
     double KilledAt = -1.0;
 
-    // When something last took hull off them, which is what a repair bay waits
+    // When something last took health off them, which is what a repair bay waits
     // on before it starts giving any back.
     double LastDamageTime = -1000.0;
 
-    // Credit for firing, in rounds. Spent one per shot and refilled at whatever
+    // Credit for firing, in lasers. Spent one per laser and refilled at whatever
     // rate the build on file is entitled to.
     float FireTokens = 0.0f;
 
-    // When their own hull was last reported to them.
+    // When their own health was last reported to them.
     double LastHealthReport = -1000.0;
 };
 
@@ -455,7 +455,7 @@ private:
     }
 
     // Takes a bite out of a rock, breaking it only once nothing is left. Returns
-    // true for the round that finished it, which is what decides who is paid.
+    // true for the laser that finished it, which is what decides who is paid.
     bool DamageAsteroid(uint32_t asteroidId, float damage)
     {
         int slot = FindAsteroidById(asteroidId);
@@ -480,7 +480,7 @@ private:
         double now = GetClockSeconds();
 
         // A guard here used to ignore repeat reports within a tenth of a second.
-        // Reports are single rounds now, and a shotgun lands ten in one frame.
+        // Reports are single lasers now, and a shotgun lands ten in one frame.
         ServerAsteroid parent = asteroids[slot];
 
         // Freed before the fragments are allocated, so a split never has to
@@ -554,7 +554,7 @@ private:
     // trusts a number that arrived from a client.
 
     // The fields a client may not describe about itself. Called on every outbound
-    // PlayerPacket, so a hull or a level reaches nobody except from here.
+    // PlayerPacket, so a health or a level reaches nobody except from here.
     void StampPlayerState(PlayerPacket& packet, int playerId)
     {
         packet.Health = players[playerId].Health;
@@ -624,7 +624,7 @@ private:
         }
 
         // The victim is told so it can respawn; it had no way to know, since the
-        // shot was judged on the shooter's screen.
+        // laser was judged on the shooter's screen.
         PlayerKillPacket notify = {};
         notify.Command = static_cast<int>(NetworkCommands::PlayerKilled);
         notify.KillerId = killerId;
@@ -673,7 +673,7 @@ private:
         return true;
     }
 
-    // Hull comes back only after a stretch with nothing hitting us, so a repair
+    // Health comes back only after a stretch with nothing hitting us, so a repair
     // bay decides what happens between fights rather than during one.
     void UpdatePlayers(double delta)
     {
@@ -962,7 +962,7 @@ private:
                 // a client cannot decide for itself how hard its guns hit.
                 const float damage = players[playerId].Upgrades.Stats().Damage;
 
-                // Only the round that finishes a rock is paid for it, so score
+                // Only the laser that finishes a rock is paid for it, so score
                 // still counts rocks rather than trigger pulls.
                 if (DamageAsteroid(received.AsteroidId, damage))
                 {
@@ -974,14 +974,14 @@ private:
             }
 
             // Still judged by the shooter, as kills used to be. Landing one now
-            // takes hull off rather than ending a run on its own.
+            // takes health off rather than ending a run on its own.
             case NetworkCommands::PlayerHit:
             {
                 if (len != sizeof(PlayerHitPacket))
                     return;
 
                 // The shooter is taken from the connection, so a client can only
-                // ever report its own shots, never someone else's.
+                // ever report its own lasers, never someone else's.
                 int shooterId = GetPlayerId(connId);
                 if (shooterId == -1)
                     return;
@@ -1079,7 +1079,7 @@ private:
                 if (playerId == -1)
                     return;
 
-                // One credit for the whole pull, however many rounds it becomes.
+                // One credit for the whole pull, however many lasers it becomes.
                 if (players[playerId].FireTokens < 1.0f)
                     return;
                 players[playerId].FireTokens -= 1.0f;
@@ -1092,9 +1092,9 @@ private:
                 // The client says where it stood and faced; every other field is
                 // filled in here, so nobody can claim a gun they have not earned.
                 received.PlayerID = playerId;
-                received.Speed = stats.ProjectileSpeed;
-                received.Radius = stats.ProjectileRadius;
-                received.Lifetime = stats.ProjectileLifetime;
+                received.Speed = stats.LaserSpeed;
+                received.Radius = stats.LaserRadius;
+                received.Lifetime = stats.LaserLifetime;
                 received.WeaponId = players[playerId].Upgrades.WeaponEvolution();
 
                 SendPacketToAllBut(&received, sizeof(received), playerId);

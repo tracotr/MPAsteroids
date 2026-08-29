@@ -8,15 +8,15 @@
 #include <stdio.h>
 
 // Sized for a lobby firing the wide end of the tree. One Shottier Gun pull is
-// thirty rounds, so a single player can have over a hundred in the air.
-#define MAX_PROJECTILES 2048
+// thirty lasers, so a single player can have over a hundred in the air.
+#define MAX_LASERS 2048
 
-// Slots only our own rounds may take. Remote fire starts past them, so a busy
+// Slots only our own lasers may take. Remote fire starts past them, so a busy
 // lobby can never leave us with nowhere to put the volley we just fired.
-#define LOCAL_PROJECTILE_RESERVE 256
+#define LOCAL_LASER_RESERVE 256
 
 // Trigger pulls that can arrive between two frames. One entry covers a whole
-// volley however wide it is, so this needs to be nowhere near the round count.
+// volley however wide it is, so this needs to be nowhere near the laser count.
 #define MAX_REMOTE_VOLLEYS 128
 
 enum class NetStatus
@@ -105,7 +105,7 @@ private:
     // exists so the ship can be flown without asking for every stat it needs.
     UpgradeState Upgrades;
 
-    // Our own hull. It cannot ride on the position updates the way every other
+    // Our own health. It cannot ride on the position updates the way every other
     // ship's does, since those go to everyone except the player they describe.
     float LocalHealth = 100.0f;
     float LocalMaxHealth = 100.0f;
@@ -146,7 +146,7 @@ public:
         double ArrivalTime;
     };
 
-    // Volleys rather than rounds, so one shotgun blast takes one slot.
+    // Volleys rather than lasers, so one shotgun blast takes one slot.
     RemoteVolleyEvent RemoteVolleyQueue[MAX_REMOTE_VOLLEYS];
     int RemoteVolleyCount = 0;
 
@@ -162,33 +162,33 @@ public:
     // How long a queued volley has been waiting, in seconds.
     double QueuedVolleyAge(int index) const;
 
-    // Reports landing a shot on another player. The server decides what it costs
-    // them, and whether it took the last of their hull.
+    // Reports landing a laser on another player. The server decides what it costs
+    // them, and whether it took the last of their health.
     void ReportHit(int victimId);
 
     // Reports running into an asteroid, and hides the rock locally. The damage
-    // is worked out server-side from the rock's size and our own hull.
+    // is worked out server-side from the rock's size and our own health.
     void ReportAsteroidCollision(uint32_t asteroidId);
 
     // Takes one of the cards the server has offered us. Ignored by the server
     // unless it really was one of them.
     void SendUpgradeChoice(uint8_t upgradeId);
 
-    // True once when the server says we were shot. Returns the shooter's id.
+    // True once when the server says we were laser. Returns the shooter's id.
     bool ConsumeKilled(int* killerId);
 
     // index is a per-frame slot, valid only until the next NetUpdate.
     bool GetAsteroidSpatial(int index, Vector3* pos, Matrix* rot, float* scale = nullptr);
     uint32_t GetAsteroidId(int index) const;
 
-    // Reports one round landing on a rock and takes that much off our own copy, so
-    // the damage shows at once. Returns true if this round finished it.
+    // Reports one laser landing on a rock and takes that much off our own copy, so
+    // the damage shows at once. Returns true if this laser finished it.
     bool ReportAsteroidHit(uint32_t asteroidId, float damage);
 
     void HandleUpdateScoreboard(ScoreboardPacket packet);
 
     // Reports one trigger pull. What it becomes is worked out from the weapon by
-    // whoever receives it, so this goes out once however many rounds it fires.
+    // whoever receives it, so this goes out once however many lasers it fires.
     void SendVolley(Vector3 position, Vector3 forward, Vector3 up, int volleyIndex);
 
     bool NetConnect(const char* address, const char* playerName = nullptr);
@@ -211,8 +211,8 @@ public:
     float GetHealth() const { return LocalHealth; }
     float GetMaxHealth() const { return LocalMaxHealth; }
 
-    // Another ship's hull, for drawing a bar over it. False when we have never
-    // heard how much hull that ship has.
+    // Another ship's health, for drawing a bar over it. False when we have never
+    // heard how much health that ship has.
     bool GetPlayerHealth(int id, float* health, float* maxHealth) const;
     uint8_t GetPlayerEvolution(int id) const;
     int GetPlayerLevel(int id) const;

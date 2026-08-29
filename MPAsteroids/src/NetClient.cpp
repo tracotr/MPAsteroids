@@ -273,7 +273,7 @@ bool NetClient::GetPlayerSpatial(int id, Vector3* pos, Matrix* rot)
 }
 
 // Whether a player has gone quiet. Separate from GetPlayerSpatial on purpose: a
-// quiet player is still drawn, they just cannot be shot.
+// quiet player is still drawn, they just cannot be laser.
 static double NowSeconds()
 {
     return emscripten_get_now() * 0.001;
@@ -297,7 +297,7 @@ bool NetClient::IsPlayerStale(int id) const
 }
 
 // The rock is hidden now, because it is about to break whatever else happens.
-// What it costs us is scaled by the server from its size and our hull.
+// What it costs us is scaled by the server from its size and our health.
 void NetClient::ReportAsteroidCollision(uint32_t asteroidId)
 {
     if (asteroidId == 0)
@@ -467,7 +467,7 @@ void NetClient::HideAsteroidLocally(uint32_t asteroidId)
         if (Asteroids[i].Id != asteroidId)
             continue;
 
-        // Hidden without waiting for the round trip, so hitting a rock feels
+        // Hidden without waiting for the server to answer, so hitting a rock feels
         // immediate. The grace period restores it if the server declines.
         Asteroids[i].DestroyReportedAt = LastNow;
         return;
@@ -493,7 +493,7 @@ bool NetClient::ReportAsteroidHit(uint32_t asteroidId, float damage)
 
         Asteroids[i].Health -= damage;
 
-        // Hidden without waiting for the reply, so the shot that finishes a rock
+        // Hidden without waiting for the reply, so the laser that finishes a rock
         // feels like it did. The grace period restores it if the server disagrees.
         if (Asteroids[i].Health <= 0.0f)
         {

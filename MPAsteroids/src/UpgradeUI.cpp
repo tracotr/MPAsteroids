@@ -151,7 +151,7 @@ void UpgradeUI::Draw(NetClient& net)
     const int screenWidth = GetScreenWidth();
     const int screenHeight = GetScreenHeight();
 
-    // --- hull and progress, centred on the bottom edge ---
+    // --- health and progress, centred on the bottom edge ---
 
     const int barX = (screenWidth - BAR_WIDTH) / 2;
     const int levelBarY = screenHeight - BAR_BOTTOM_MARGIN - BAR_HEIGHT;
@@ -167,7 +167,7 @@ void UpgradeUI::Draw(NetClient& net)
                                                       : (Color){ 210, 70, 70, 230 };
 
     DrawBar(barX, healthBarY, BAR_WIDTH, BAR_HEIGHT, healthFraction, healthFill,
-            TextFormat("HULL  %i / %i", (int)(health + 0.5f), (int)(maxHealth + 0.5f)));
+            TextFormat("HEALTH  %i / %i", (int)(health + 0.5f), (int)(maxHealth + 0.5f)));
 
     const int level = upgrades.Level();
     const int levelFloor = XpToReachLevel(level);
@@ -202,7 +202,7 @@ void UpgradeUI::Draw(NetClient& net)
     const int totalWidth = offerCount * CARD_WIDTH + (offerCount - 1) * CARD_GAP;
     const int startX = (screenWidth - totalWidth) / 2;
 
-    // Stacked directly above the hull bar, with room for the heading over it.
+    // Stacked directly above the health bar, with room for the heading over it.
     const int cardY = healthBarY - 14 - CARD_HEIGHT;
 
     const char* heading = milestone ? "CHOOSE YOUR PATH" : "CHOOSE AN UPGRADE";
