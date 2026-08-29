@@ -6,8 +6,6 @@ class Player : public Entity
 {
 public:
     double laserCooldown = 0.0;
-    const float LASER_SPEED = 30.0f;
-    const double LASER_COOLDOWN_DURATION = 0.25;
 
     // Radians of turn per pixel of mouse movement.
     const float MOUSE_SENSITIVITY = 0.0025f;

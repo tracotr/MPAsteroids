@@ -130,7 +130,7 @@ namespace Names
         const std::string& noun = nouns[GetRandomValue(0, (int)nouns.size() - 1)];
 
         // The digits are what separate two players who drew the same pair, so the
-        // words are trimmed to make room for them rather than the other way round.
+        // words are trimmed to make room for them rather than the other way laser.
         std::string words = adjective + noun;
         if (words.size() > ROOM_FOR_WORDS)
             words.resize(ROOM_FOR_WORDS);

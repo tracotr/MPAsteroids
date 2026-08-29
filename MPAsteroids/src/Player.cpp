@@ -19,18 +19,25 @@ void Player::Update(double delta)
         Sounds::StopBooster();
     }
 
+    // Everything the ship can do now comes from the build the server has us on,
+    // rather than from constants compiled into the ship itself.
+    const ShipStats& stats = GameApp::GetInstance()->GetNet().GetStats();
+
+    // Clamped in double, not raymath's float Clamp: rounding the cap to float lands
+    // it just under the double it is tested against, and the gun never fires again.
     laserCooldown += delta;
-    laserCooldown = Clamp(laserCooldown, 0.0, LASER_COOLDOWN_DURATION);
+    if (laserCooldown > stats.FireCooldown)
+        laserCooldown = stats.FireCooldown;
 
     // Clicking with the pointer loose captures it, so the mouse only fires once
-    // captured; otherwise the click that grabs the pointer also fires a shot.
+    // captured; otherwise the click that grabs the pointer also fires a laser.
     const bool mouseCaptured = GameApp::GetInstance()->IsMouseCaptured();
     bool firing = IsKeyDown(KEY_SPACE) || (mouseCaptured && IsMouseButtonDown(MOUSE_BUTTON_LEFT));
 
     isFiring = false;
     if (firing)
     {
-        if(laserCooldown >= LASER_COOLDOWN_DURATION)
+        if(laserCooldown >= stats.FireCooldown)
         {
             laserCooldown = 0;
             Sounds::PlayLaser(Position, Position);
@@ -46,10 +53,8 @@ void Player::Update(double delta)
         currentRotationSpeed = SlowRotationSpeed;
     }
 
-    // Mouse look, only while the pointer is captured. GetMouseDelta is already
-    // movement since the last frame, so this needs no scaling by delta the way a
-    // held key would. Signs follow the keys below: right yaws like D, and pushing
-    // the mouse away pitches like R.
+    // Mouse look, only while captured. GetMouseDelta is already movement since the
+    // last frame, so it needs no delta. Right yaws like D, away pitches like R.
     if (mouseCaptured)
     {
         Vector2 look = GetMouseDelta();
@@ -69,16 +74,25 @@ void Player::Update(double delta)
     if (IsKeyDown(KEY_Q)) Rotation = MatrixMultiply(MatrixRotateZ(currentRotationSpeed), Rotation);
     if (IsKeyDown(KEY_E)) Rotation = MatrixMultiply(MatrixRotateZ(-currentRotationSpeed), Rotation);
 
-    if (IsKeyDown(KEY_W) && Vector3LengthSqr(Velocity) <= MaxSpeed)
-    {
-        Vector3 forward = Vector3Transform(Forward, Rotation);
-        Velocity = Vector3Add(Velocity, forward);
-    }
+    // Thrust is a rate per second rather than a push per frame, tuned so that at
+    // sixty frames a second it accelerates exactly as it always did.
+    const bool forwardThrust = IsKeyDown(KEY_W);
+    const bool reverseThrust = IsKeyDown(KEY_S);
+    const float thrust = stats.Acceleration * (float)delta;
 
-    if (IsKeyDown(KEY_S) && Vector3LengthSqr(Velocity) <= MaxSpeed / 2)
+    if (forwardThrust)
+        Velocity = Vector3Add(Velocity, Vector3Scale(Vector3Transform(Forward, Rotation), thrust));
+
+    if (reverseThrust)
+        Velocity = Vector3Add(Velocity, Vector3Scale(Vector3Transform(Backward, Rotation), thrust));
+
+    // Reversing still tops out lower than flying forwards does, which is what the
+    // pair of separate limits here used to say.
+    const float speedCap = (reverseThrust && !forwardThrust) ? stats.ReverseTopSpeed : stats.TopSpeed;
+    const float speed = Vector3Length(Velocity);
+    if (speed > speedCap && speed > 0.0001f)
     {
-        Vector3 forward = Vector3Transform(Backward, Rotation);
-        Velocity = Vector3Add(Velocity, forward);
+        Velocity = Vector3Scale(Velocity, speedCap / speed);
     }
 
 	Vector3 friction = Vector3Scale(Vector3Normalize(Velocity), -2.5f * (float)delta);
@@ -109,9 +123,8 @@ namespace
     // set of spawn points, because the things to avoid keep moving.
     const int SPAWN_CANDIDATES = 24;
 
-    // A spot this clear is good enough; no need to check the rest. Roughly half
-    // a second of laser flight, so a fresh ship has a moment before anyone
-    // already nearby can reach it.
+    // A spot this clear is good enough. Roughly half a second of laser flight, so
+    // a fresh ship has a moment before anyone nearby can reach it.
     const float SPAWN_GOOD_ENOUGH = 14.0f;
 
     float RandomUnitFloat()
@@ -174,10 +187,8 @@ namespace
         return clearance;
     }
 
-    // Turns the ship back toward the middle of the play area, so spawning out on
-    // the edge does not leave the player staring into empty space. The model's
-    // local forward is -Z, which is why the Z axis gets the opposite of the
-    // direction we want to point.
+    // Turns the ship back toward the middle, so spawning on the edge does not leave
+    // you staring into empty space. Model forward is -Z, hence the negation.
     Matrix LookTowardOrigin(Vector3 from)
     {
         Vector3 forward = Vector3Subtract((Vector3){ 0.0f, 0.0f, 0.0f }, from);

@@ -19,9 +19,8 @@ namespace Models
     extern float ShipRadiusLocal;
     extern float AsteroidRadiusLocal;
 
-    // Average half-extent rather than the corner distance. A rock is treated as
-    // a ball when it hits a ship, and the corner distance would make that ball
-    // much fatter than the model actually looks.
+    // Average half-extent rather than the corner distance, which would make the
+    // ball a rock is treated as much fatter than the model looks.
     extern float AsteroidBodyRadius;
 
     

@@ -2,6 +2,7 @@
 
 #include "include/WebSocketServer.h"
 #include "include/networking/NetConstants.h"
+#include "include/Upgrades.h"
 
 #include <atomic>
 #include <chrono>
@@ -16,17 +17,46 @@
 // A player is a harder target than a rock, so worth more.
 #define KILL_SCORE 25
 
+// Not the same number as score. Score is the leaderboard and resets on death;
+// experience is the build, and dying only costs half of it.
+#define BASE_XP 5
+#define KILL_XP 25
+
+// For testing; defaults to the real game so an ordinary build cannot ship it.
+//   make server EXTRA_SERVER_DEFINES=-DXP_MULTIPLIER=20
+#ifndef XP_MULTIPLIER
+#define XP_MULTIPLIER 1
+#endif
+
+// What a full-sized rock does to a health it runs into. An unupgraded ship has a
+// hundred, so a big asteroid still ends a run exactly as it always did.
+#define ASTEROID_RAM_DAMAGE 130.0f
+
+// How many trigger pulls of credit a ship can bank. Timing the gap exactly would
+// throw a laser away every time a frame ran late.
+const float FIRE_BURST_VOLLEYS = 2.0f;
+
+// How often a regenerating health tells its owner about it. Regen is gentle and the
+// bar moves slowly, so there is no reason to spend a packet every tick.
+const double HEALTH_REPORT_INTERVAL = 0.2;
+
 const double SERVER_TICK_RATE = 30.0;
 const double SERVER_TICK_INTERVAL = 1.0 / SERVER_TICK_RATE;
 
-// Asteroid positions are sent every Nth tick. Clients keep the rocks moving on
-// their own in between, so a bigger number saves traffic but lets their guess
-// drift further before the next update corrects it.
+// Asteroid positions are sent every Nth tick, and clients keep the rocks moving in
+// between. A bigger number saves traffic but lets their guess drift further.
 const int ASTEROID_BROADCAST_EVERY = 3; // 30Hz / 3 = 10Hz
 
 // Cap on asteroids created in a single tick, so filling an empty field is spread
 // over a few frames rather than arriving as one spike.
 const int ASTEROID_SPAWNS_PER_TICK = 4;
+
+// Applies a bounty, rounded rather than truncated. Truncating ate the first rank
+// on cheap targets: five plus fifteen per cent is 5.75, cut back to five.
+static int WithBounty(int amount, float multiplier)
+{
+    return (int)(amount * multiplier + 0.5f);
+}
 
 struct ServerPlayer
 {
@@ -38,10 +68,30 @@ struct ServerPlayer
     Matrix Rotation = MatrixIdentity();
     int Score = 0;
 
+    // The build and the health it produces, both here rather than on the client: one
+    // that owned its own build could award itself anything, and never die.
+    UpgradeState Upgrades;
+    float Health = 100.0f;
+
+    // Seeded per player, so two people levelling in the same instant are not
+    // handed the same three cards.
+    uint32_t OfferRng = 0;
+
     // When they last reported in, and when they were last killed. Together these
     // stop a ship whose client has stopped running from being farmed for points.
     double LastInputTime = 0.0;
     double KilledAt = -1.0;
+
+    // When something last took health off them, which is what a repair bay waits
+    // on before it starts giving any back.
+    double LastDamageTime = -1000.0;
+
+    // Credit for firing, in lasers. Spent one per laser and refilled at whatever
+    // rate the build on file is entitled to.
+    float FireTokens = 0.0f;
+
+    // When their own health was last reported to them.
+    double LastHealthReport = -1000.0;
 };
 
 // One switched-on cube of the play area.
@@ -51,9 +101,8 @@ struct RegionCell
     double LastOccupied = 0.0;
 };
 
-// The server's own record of an asteroid. Kept separate from the version sent
-// to clients because it holds things they never need: whether the slot is in
-// use, and when it was last hit.
+// The server's own record of an asteroid, separate from the version sent to
+// clients because it holds things they never need.
 struct ServerAsteroid
 {
     bool Active = false;
@@ -62,6 +111,11 @@ struct ServerAsteroid
     Vector3 Position = { 0.0f, 0.0f, 0.0f };
     Vector3 Velocity = { 0.0f, 0.0f, 0.0f };
     float Scale = 1.0f;
+
+    // Worked out from Scale whenever the rock is made or resized, so its size and
+    // its toughness cannot drift apart.
+    float Health = 0.0f;
+
     double LastHitTime = -1.0;
 };
 
@@ -128,9 +182,8 @@ private:
         return dist(gen);
     }
 
-    // Throws away points that land outside the sphere and tries again, which
-    // spreads the directions evenly. Just picking each axis at random and
-    // scaling to length one would bunch them up toward the corners.
+    // Throws away points outside the sphere and tries again, which spreads the
+    // directions evenly. Scaling each axis instead bunches them at the corners.
     Vector3 RandomDirection()
     {
         for (int attempt = 0; attempt < 12; ++attempt)
@@ -143,10 +196,8 @@ private:
         return (Vector3){ 0.0f, 0.0f, 1.0f };
     }
 
-    // Counts players actually in the world, not just ones with a socket open.
-    // The world is built around players whose position we know, so counting one
-    // that has connected but not sent a position yet would switch on nothing and
-    // leave us spawning rocks with nowhere to put them.
+    // Players actually in the world, not just ones with a socket open. Counting a
+    // player who has not sent a position yet would leave rocks nowhere to go.
     int ActivePlayerCount() const
     {
         int count = 0;
@@ -197,16 +248,8 @@ private:
         return -1;
     }
 
-    // --- The play area -------------------------------------------------------
-    //
-    // The world is a set of cubes. Cubes switch on wherever a player is and
-    // switch off once nobody has been inside for a while, so it grows as people
-    // explore and shrinks back afterwards. Asteroids are kept inside whatever is
-    // switched on.
-    //
-    // Because the world is a place rather than a bubble around one player, an
-    // asteroid being put back into play can be given a spot nobody is standing
-    // in, instead of one measured out from whoever happens to be closest.
+    // --- The play area: cubes switch on where players are, off once empty ------
+    // Asteroids are kept inside whatever is switched on.
 
     static int CellIndexOf(float value)
     {
@@ -242,10 +285,8 @@ private:
         regionCellCount++;
     }
 
-    // Switches on the eight cubes that meet at the grid corner nearest the
-    // player, which keeps them well inside the world. Switching on only the cube
-    // they stand in leaves anyone near an edge with world on one side and
-    // nothing on the other.
+    // Switches on the eight cubes meeting at the nearest grid corner, so a player
+    // near an edge does not end up with world on one side and nothing on the other.
     void TouchRegionAround(const Vector3& position, double now)
     {
         const int cx = (int)roundf(position.x / REGION_CELL_SIZE);
@@ -353,6 +394,7 @@ private:
         asteroid.Position = PickPlacementInCell(cellIndex);
         asteroid.Velocity = Vector3Scale(RandomDirection(), RandBetween(1.2f, 3.2f));
         asteroid.Scale = RandBetween(0.85f, 1.45f);
+        asteroid.Health = AsteroidHealthForScale(asteroid.Scale);
         return true;
     }
 
@@ -379,10 +421,8 @@ private:
         return emptiest;
     }
 
-    // Tops the field up, always filling whichever cube has the fewest asteroids.
-    // Someone who has just reached somewhere new needs their empty cubes filled
-    // first; picking cubes at random would leave them in an empty sky while
-    // long-settled ones got topped up alongside them.
+    // Tops the field up, always filling whichever cube has fewest, so somebody who
+    // has just arrived somewhere new is not left in an empty sky.
     void MaintainAsteroidPopulation()
     {
         const int desired = DesiredAsteroidCount();
@@ -414,6 +454,23 @@ private:
         }
     }
 
+    // Takes a bite out of a rock, breaking it only once nothing is left. Returns
+    // true for the laser that finished it, which is what decides who is paid.
+    bool DamageAsteroid(uint32_t asteroidId, float damage)
+    {
+        int slot = FindAsteroidById(asteroidId);
+        if (slot == -1)
+            return false;
+
+        asteroids[slot].Health -= damage;
+        asteroids[slot].LastHitTime = GetClockSeconds();
+
+        if (asteroids[slot].Health > 0.0f)
+            return false;
+
+        return BreakAsteroid(asteroidId);
+    }
+
     bool BreakAsteroid(uint32_t asteroidId)
     {
         int slot = FindAsteroidById(asteroidId);
@@ -422,11 +479,8 @@ private:
 
         double now = GetClockSeconds();
 
-        // Two clients can report the same hit before either hears back, so a
-        // second report this soon is ignored.
-        if (asteroids[slot].LastHitTime > 0.0 && now - asteroids[slot].LastHitTime < 0.1)
-            return false;
-
+        // A guard here used to ignore repeat reports within a tenth of a second.
+        // Reports are single lasers now, and a shotgun lands ten in one frame.
         ServerAsteroid parent = asteroids[slot];
 
         // Freed before the fragments are allocated, so a split never has to
@@ -458,6 +512,7 @@ private:
             child.Position = Vector3Add(parent.Position, Vector3Scale(separation, sign));
             child.Velocity = Vector3Add(parent.Velocity, Vector3Scale(tangent, kick * sign));
             child.Scale = childScale;
+            child.Health = AsteroidHealthForScale(childScale);
             child.LastHitTime = now;
         }
 
@@ -495,6 +550,163 @@ private:
         SendPacketToAllBut(&buffer, sizeof(buffer), -1);
     }
 
+    // Everything below stamps or derives from server-held state. None of it
+    // trusts a number that arrived from a client.
+
+    // The fields a client may not describe about itself. Called on every outbound
+    // PlayerPacket, so a health or a level reaches nobody except from here.
+    void StampPlayerState(PlayerPacket& packet, int playerId)
+    {
+        packet.Health = players[playerId].Health;
+        packet.MaxHealth = players[playerId].Upgrades.Stats().MaxHealth;
+        packet.Level = (uint8_t)players[playerId].Upgrades.Level();
+        packet.Evolution = players[playerId].Upgrades.WeaponEvolution();
+    }
+
+    void SendHealth(int playerId, double now)
+    {
+        players[playerId].LastHealthReport = now;
+
+        PlayerHealthPacket buffer = {};
+        buffer.Command = static_cast<int>(NetworkCommands::UpdateHealth);
+        buffer.Health = players[playerId].Health;
+        buffer.MaxHealth = players[playerId].Upgrades.Stats().MaxHealth;
+        SendPacketToOnly(&buffer, sizeof(buffer), playerId);
+    }
+
+    // Rolls a fresh offer first if one is owed, so a client is never told a pick
+    // is waiting without also being told what the pick is between.
+    void SendUpgradeState(int playerId)
+    {
+        UpgradeState& state = players[playerId].Upgrades;
+
+        if (state.PendingPicks() > 0 && state.OfferCount() == 0)
+            state.RollOffer(players[playerId].OfferRng);
+
+        UpgradeStatePacket buffer = {};
+        state.WriteTo(buffer);
+        SendPacketToOnly(&buffer, sizeof(buffer), playerId);
+    }
+
+    // All experience is awarded here, so one multiplier retunes the pace. Bounty
+    // applies to it as well as score, and so compounds into more picks.
+    void GrantXp(int playerId, int amount)
+    {
+        const float multiplier = players[playerId].Upgrades.Stats().ScoreMultiplier;
+
+        // Levelling only ever hands out a pick. Nothing about the ship changes
+        // until the player actually chooses something.
+        players[playerId].Upgrades.AddXp(WithBounty(amount, multiplier) * XP_MULTIPLIER);
+        SendUpgradeState(playerId);
+    }
+
+    void AwardScore(int playerId, int base)
+    {
+        players[playerId].Score += WithBounty(base, players[playerId].Upgrades.Stats().ScoreMultiplier);
+    }
+
+    void KillPlayer(int victimId, int killerId, double now)
+    {
+        players[victimId].KilledAt = now;
+
+        // Dying costs the whole score but only half the build, so a good run
+        // still leaves something behind to fly back out on.
+        players[victimId].Score = 0;
+        players[victimId].Upgrades.ApplyDeathPenalty();
+        players[victimId].Health = players[victimId].Upgrades.Stats().MaxHealth;
+        players[victimId].LastDamageTime = -1000.0;
+        players[victimId].FireTokens = 0.0f;
+
+        if (killerId >= 0 && killerId < MAX_PLAYERS && players[killerId].Active)
+        {
+            AwardScore(killerId, KILL_SCORE);
+            GrantXp(killerId, KILL_XP);
+        }
+
+        // The victim is told so it can respawn; it had no way to know, since the
+        // laser was judged on the shooter's screen.
+        PlayerKillPacket notify = {};
+        notify.Command = static_cast<int>(NetworkCommands::PlayerKilled);
+        notify.KillerId = killerId;
+        notify.VictimId = victimId;
+        SendPacketToOnly(&notify, sizeof(notify), victimId);
+
+        SendUpgradeState(victimId);
+        SendHealth(victimId, now);
+        UpdateScoreboard();
+    }
+
+    // Every point of damage arrives here, which is why armour is applied here
+    // rather than at the call sites. It does not care what the damage was.
+    void ApplyDamage(int victimId, float amount, int killerId, double now)
+    {
+        amount *= players[victimId].Upgrades.Stats().DamageTakenScale;
+
+        if (amount <= 0.0f)
+            return;
+
+        players[victimId].Health -= amount;
+        players[victimId].LastDamageTime = now;
+
+        if (players[victimId].Health > 0.0f)
+        {
+            SendHealth(victimId, now);
+            return;
+        }
+
+        KillPlayer(victimId, killerId, now);
+    }
+
+    // Stops an abandoned ship being farmed: a client not running frames never
+    // processes its respawn, so it sits there as a free target.
+    bool CanBeHurt(int victimId, double now) const
+    {
+        if (victimId < 0 || victimId >= MAX_PLAYERS || !players[victimId].Active)
+            return false;
+
+        if (now - players[victimId].LastInputTime > PLAYER_STALE_SECONDS)
+            return false;
+
+        if (players[victimId].KilledAt > 0.0 && now - players[victimId].KilledAt < KILL_COOLDOWN_SECONDS)
+            return false;
+
+        return true;
+    }
+
+    // Health comes back only after a stretch with nothing hitting us, so a repair
+    // bay decides what happens between fights rather than during one.
+    void UpdatePlayers(double delta)
+    {
+        const double now = GetClockSeconds();
+
+        for (int i = 0; i < MAX_PLAYERS; ++i)
+        {
+            if (!players[i].Active || !players[i].ValidPosition)
+                continue;
+
+            const ShipStats& stats = players[i].Upgrades.Stats();
+
+            // Credit builds up even while nobody is firing, which is what lets a
+            // pull leave immediately after a pause.
+            const float perSecond = (float)(1.0 / stats.FireCooldown);
+            const float ceiling = FIRE_BURST_VOLLEYS;
+            players[i].FireTokens += perSecond * (float)delta;
+            if (players[i].FireTokens > ceiling)
+                players[i].FireTokens = ceiling;
+
+            if (stats.Regen <= 0.0f) continue;
+            if (players[i].Health >= stats.MaxHealth) continue;
+            if (now - players[i].LastDamageTime < REGEN_DELAY_SECONDS) continue;
+
+            players[i].Health += stats.Regen * (float)delta;
+            if (players[i].Health > stats.MaxHealth)
+                players[i].Health = stats.MaxHealth;
+
+            if (now - players[i].LastHealthReport >= HEALTH_REPORT_INTERVAL)
+                SendHealth(i, now);
+        }
+    }
+
     int GetPlayerId(WebSocketServer::ConnId connId)
     {
         for (int i = 0; i < MAX_PLAYERS; ++i)
@@ -530,10 +742,26 @@ private:
         players[playerId].LastInputTime = GetClockSeconds();
         players[playerId].KilledAt = -1.0;
 
+        players[playerId].Upgrades.Reset();
+        players[playerId].Health = players[playerId].Upgrades.Stats().MaxHealth;
+        players[playerId].LastDamageTime = -1000.0;
+        players[playerId].LastHealthReport = -1000.0;
+        players[playerId].FireTokens = 0.0f;
+
+        // Seeded from the slot and the clock together, so two people joining in
+        // the same moment do not walk the same sequence of offers.
+        players[playerId].OfferRng = (uint32_t)(playerId * 2654435761u)
+                                   ^ (uint32_t)(GetClockSeconds() * 1000.0);
+
         PlayerPacket acceptBuffer = {};
         acceptBuffer.Command = static_cast<int>(NetworkCommands::AcceptPlayer);
         acceptBuffer.Id = playerId;
         SendPacketToOnly(&acceptBuffer, sizeof(acceptBuffer), playerId);
+
+        // Sent after the accept, so the client knows which id the build belongs
+        // to before it is handed one.
+        SendUpgradeState(playerId);
+        SendHealth(playerId, GetClockSeconds());
 
         for (int i = 0; i < MAX_PLAYERS; ++i)
         {
@@ -548,6 +776,7 @@ private:
                 std::strncpy(otherBuffer.Name, players[i].Name, sizeof(otherBuffer.Name) - 1);
             otherBuffer.Position = players[i].Position;
             otherBuffer.Rotation = players[i].Rotation;
+            StampPlayerState(otherBuffer, i);
             SendPacketToOnly(&otherBuffer, sizeof(otherBuffer), playerId);
         }
 
@@ -645,6 +874,7 @@ private:
             out.Position = asteroids[i].Position;
             out.Velocity = asteroids[i].Velocity;
             out.Scale = asteroids[i].Scale;
+            out.Health = asteroids[i].Health;
         }
 
         buffer.AsteroidCount = count;
@@ -680,6 +910,7 @@ private:
             std::strncpy(addPacket.Name, players[playerId].Name, sizeof(addPacket.Name) - 1);
             addPacket.Position = players[playerId].Position;
             addPacket.Rotation = players[playerId].Rotation;
+            StampPlayerState(addPacket, playerId);
             SendPacketToAllBut(&addPacket, sizeof(addPacket), playerId);
 
             UpdateScoreboard();
@@ -693,6 +924,7 @@ private:
             std::strncpy(updatePlayerPacket.Name, players[playerId].Name, sizeof(updatePlayerPacket.Name) - 1);
         updatePlayerPacket.Position = players[playerId].Position;
         updatePlayerPacket.Rotation = players[playerId].Rotation;
+        StampPlayerState(updatePlayerPacket, playerId);
         SendPacketToAllBut(&updatePlayerPacket, sizeof(updatePlayerPacket), playerId);
     }
 
@@ -712,13 +944,13 @@ private:
                 break;
             }
 
-            case NetworkCommands::DestroyAsteroid:
+            case NetworkCommands::HitAsteroid:
             {
-                if (len != sizeof(AsteroidDestroyPacket))
+                if (len != sizeof(AsteroidHitPacket))
                     return;
 
-                AsteroidDestroyPacket received = {};
-                memcpy(&received, data, sizeof(AsteroidDestroyPacket));
+                AsteroidHitPacket received = {};
+                memcpy(&received, data, sizeof(AsteroidHitPacket));
 
                 // The scoring player is taken from the connection rather than the
                 // packet, so a client cannot bank points into someone else's slot.
@@ -726,83 +958,146 @@ private:
                 if (playerId == -1)
                     return;
 
-                if (BreakAsteroid(received.AsteroidId))
+                // Read from the shooter's stored build, never from the packet, so
+                // a client cannot decide for itself how hard its guns hit.
+                const float damage = players[playerId].Upgrades.Stats().Damage;
+
+                // Only the laser that finishes a rock is paid for it, so score
+                // still counts rocks rather than trigger pulls.
+                if (DamageAsteroid(received.AsteroidId, damage))
                 {
-                    players[playerId].Score += BASE_SCORE;
+                    AwardScore(playerId, BASE_SCORE);
+                    GrantXp(playerId, BASE_XP);
                     UpdateScoreboard();
                 }
                 break;
             }
 
-            case NetworkCommands::PlayerKilled:
+            // Still judged by the shooter, as kills used to be. Landing one now
+            // takes health off rather than ending a run on its own.
+            case NetworkCommands::PlayerHit:
             {
-                if (len != sizeof(PlayerKillPacket))
+                if (len != sizeof(PlayerHitPacket))
                     return;
 
-                // The killer is taken from the connection, so a client can only
-                // ever claim its own kills, never award them to someone else.
-                int killerId = GetPlayerId(connId);
-                if (killerId == -1)
+                // The shooter is taken from the connection, so a client can only
+                // ever report its own lasers, never someone else's.
+                int shooterId = GetPlayerId(connId);
+                if (shooterId == -1)
                     return;
 
-                PlayerKillPacket received = {};
-                memcpy(&received, data, sizeof(PlayerKillPacket));
+                PlayerHitPacket received = {};
+                memcpy(&received, data, sizeof(PlayerHitPacket));
 
                 const int victimId = received.VictimId;
-                if (victimId < 0 || victimId >= MAX_PLAYERS || victimId == killerId || !players[victimId].Active)
+                if (victimId == shooterId)
                     return;
 
                 const double now = GetClockSeconds();
-
-                // A client that has stopped running frames never processes the
-                // respawn it is sent, so its ship stays put. Without these two
-                // checks that abandoned ship is worth points over and over.
-                if (now - players[victimId].LastInputTime > PLAYER_STALE_SECONDS)
+                if (!CanBeHurt(victimId, now))
                     return;
 
-                if (players[victimId].KilledAt > 0.0 && now - players[victimId].KilledAt < KILL_COOLDOWN_SECONDS)
-                    return;
-
-                players[victimId].KilledAt = now;
-
-                // Dying costs the same whether it was a rock or another player.
-                players[victimId].Score = 0;
-                players[killerId].Score += KILL_SCORE;
-
-                // The victim is told so it can respawn; it had no way to know,
-                // since the shot was judged on the shooter's screen.
-                PlayerKillPacket notify = {};
-                notify.Command = static_cast<int>(NetworkCommands::PlayerKilled);
-                notify.KillerId = killerId;
-                notify.VictimId = victimId;
-                SendPacketToOnly(&notify, sizeof(notify), victimId);
-
-                UpdateScoreboard();
+                // Damage is read from the shooter's own stored build rather than
+                // from the packet, so a client cannot inflate what its guns do.
+                ApplyDamage(victimId, players[shooterId].Upgrades.Stats().Damage, shooterId, now);
                 break;
             }
 
-            case NetworkCommands::ResetScoreboardId:
+            // Self-reported, and safe to be: nobody gains by claiming to have been
+            // hurt, and only the victim runs that test.
+            case NetworkCommands::AsteroidCollision:
             {
-                if (len != sizeof(ScoreboardPacket))
+                if (len != sizeof(AsteroidCollisionPacket))
                     return;
 
                 int playerId = GetPlayerId(connId);
                 if (playerId == -1)
                     return;
 
-                players[playerId].Score = 0;
-                UpdateScoreboard();
+                AsteroidCollisionPacket received = {};
+                memcpy(&received, data, sizeof(AsteroidCollisionPacket));
+
+                const int slot = FindAsteroidById(received.AsteroidId);
+                if (slot == -1)
+                    return;
+
+                // Read before the rock breaks, which frees the slot. Armour is
+                // left to ApplyDamage, or it would count twice.
+                const float damage = ASTEROID_RAM_DAMAGE * asteroids[slot].Scale;
+
+                // Contact shatters the rock outright, or a ship tough enough to
+                // survive would sit inside it taking the hit every frame.
+                if (!BreakAsteroid(received.AsteroidId))
+                    return;
+
+                ApplyDamage(playerId, damage, -1, GetClockSeconds());
                 break;
             }
 
-            case NetworkCommands::FireProjectile:
+            case NetworkCommands::ChooseUpgrade:
             {
-                if (len != sizeof(ProjectilePacket))
+                if (len != sizeof(UpgradeChoosePacket))
                     return;
 
-                ProjectilePacket received = {};
-                memcpy(&received, data, sizeof(ProjectilePacket));
-                SendPacketToAllBut(&received, sizeof(received), GetPlayerId(connId));
+                int playerId = GetPlayerId(connId);
+                if (playerId == -1)
+                    return;
+
+                UpgradeChoosePacket received = {};
+                memcpy(&received, data, sizeof(UpgradeChoosePacket));
+
+                UpgradeState& state = players[playerId].Upgrades;
+                const float healthBefore = state.Stats().MaxHealth;
+
+                // Refused unless it was one of the cards actually shown. A refusal
+                // still answers, so a drifted client is corrected rather than stuck.
+                if (!state.Choose(received.UpgradeId))
+                {
+                    SendUpgradeState(playerId);
+                    break;
+                }
+
+                // New plating arrives as plating, not as a repair: it should help
+                // mid-fight without undoing the fight.
+                players[playerId].Health += state.Stats().MaxHealth - healthBefore;
+                if (players[playerId].Health > state.Stats().MaxHealth)
+                    players[playerId].Health = state.Stats().MaxHealth;
+                if (players[playerId].Health < 1.0f)
+                    players[playerId].Health = 1.0f;
+
+                SendUpgradeState(playerId);
+                SendHealth(playerId, GetClockSeconds());
+                break;
+            }
+
+            case NetworkCommands::FireVolley:
+            {
+                if (len != sizeof(VolleyPacket))
+                    return;
+
+                int playerId = GetPlayerId(connId);
+                if (playerId == -1)
+                    return;
+
+                // One credit for the whole pull, however many lasers it becomes.
+                if (players[playerId].FireTokens < 1.0f)
+                    return;
+                players[playerId].FireTokens -= 1.0f;
+
+                VolleyPacket received = {};
+                memcpy(&received, data, sizeof(VolleyPacket));
+
+                const ShipStats& stats = players[playerId].Upgrades.Stats();
+
+                // The client says where it stood and faced; every other field is
+                // filled in here, so nobody can claim a gun they have not earned.
+                received.PlayerID = playerId;
+                received.Speed = stats.LaserSpeed;
+                received.Radius = stats.LaserRadius;
+                received.Lifetime = stats.LaserLifetime;
+                received.WeaponId = players[playerId].Upgrades.WeaponEvolution();
+
+                SendPacketToAllBut(&received, sizeof(received), playerId);
                 break;
             }
 
@@ -820,6 +1115,7 @@ private:
             if (now >= nextTick)
             {
                 UpdateAsteroids(SERVER_TICK_INTERVAL);
+                UpdatePlayers(SERVER_TICK_INTERVAL);
                 nextTick += SERVER_TICK_INTERVAL;
 
                 // After a long pause the loop would otherwise race to catch up
