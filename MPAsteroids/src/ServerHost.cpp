@@ -25,7 +25,7 @@
 // For testing; defaults to the real game so an ordinary build cannot ship it.
 //   make server EXTRA_SERVER_DEFINES=-DXP_MULTIPLIER=20
 #ifndef XP_MULTIPLIER
-#define XP_MULTIPLIER 1
+#define XP_MULTIPLIER 3
 #endif
 
 // What a full-sized rock does to a health it runs into. An unupgraded ship has a
