@@ -40,22 +40,20 @@
 // relocate distance, so nothing vanishes while it is still worth looking at.
 #define ASTEROID_DRAW_DISTANCE 85.0f
 
-// How far out players appear, spread around the centre rather than stacked on it.
-// Far enough that a respawn does not drop you back into the fight you just lost.
-#define PLAYER_SPAWN_RADIUS 50.0f
+// The edge of the world. Ships cannot fly past this.
+#define WORLD_RADIUS 260.0f
+
+// How far out players appear, kept just inside the world edge.
+#define PLAYER_SPAWN_RADIUS 240.0f
 
 #define MAX_SQR_V3 3.402823466e+38F
-// Includes the terminator. It is a field in PlayerPacket, so changing it changes
-// the wire format and both halves have to be rebuilt together.
 #define MAX_PLAYER_NAME_LENGTH 32
 
-// The smallest piece worth making. An asteroid shatters instead of splitting
-// once shrinking it by ASTEROID_SPLIT_FACTOR would take it below this.
+// The smallest asteroid size
 #define MIN_ASTEROID_SCALE 0.45f
 #define ASTEROID_SPLIT_FACTOR 0.68f
 
-// A rock's health, from its size. Squared because a rock is an area, not a length:
-// four lasers for the biggest that spawns, one for most fragments.
+// A rock's health, from its size
 #define ASTEROID_HEALTH_PER_AREA 190.0f
 
 inline float AsteroidHealthForScale(float scale)
