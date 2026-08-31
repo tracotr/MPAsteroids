@@ -22,8 +22,7 @@ public:
 
     NetClient& GetNet() { return Net; }
 
-    // Whether the browser has actually given us pointer lock. Not IsCursorHidden():
-    // on web DisableCursor() only requests the lock and never sets that flag.
+    // Whether the browser has actually given us pointer lock.
     bool IsMouseCaptured() const { return mouseCaptured; }
     Player& GetPlayer() { return PlayerShip; }
 
