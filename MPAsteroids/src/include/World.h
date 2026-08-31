@@ -11,62 +11,52 @@
 // How long a laser lives before it fades out.
 const float LASER_LIFETIME = 2.0f;
 
-// What a laser collides as before any upgrade widens it, and more forgiving than
-// the dot that gets drawn.
+// What a laser collides as before any upgrade widens it, and more forgiving than the dot that gets drawn.
 const float LASER_HIT_RADIUS = 0.5f;
 
 // How far a tracking laser looks for something to steer toward.
 const float LASER_HOMING_RANGE = 55.0f;
 
-// How hard a tracking laser can turn, in radians a second. Low enough that it
-// bends toward a target rather than chasing one around the sky.
+// How hard a tracking laser can turn, in radians a second.
 const float LASER_HOMING_TURN_RATE = 2.2f;
 
-// Past this a laser is not drawn. The wide weapons put too many in the air to
-// spend anything on the ones nobody can see.
+// Past this a laser is not drawn.
 const float LASER_DRAW_DISTANCE = 120.0f;
 
-// Past this, a player gets no name tag and no edge arrow, or the screen edges
-// fill with markers for people nowhere near you.
-const float PLAYER_INDICATOR_RANGE = 100.0f;
+// Past this, a player gets no name tag and no edge arrow.
+const float PLAYER_INDICATOR_RANGE = 150.0f;
 
 struct Laser {
     bool active = false;
 
-    // Who fired it, so a laser cannot hit the player who sent it. -1 means the
-    // owner is unknown, which is treated as nobody's laser.
+    // Who fired it, so a laser cannot hit the player who sent it. -1 means the owner is unknown.
     int ownerId = -1;
 
     Vector3 position;
 
-    // Where it was at the start of this frame. A laser can cross more ground in one
-    // frame than a ship is wide, so collisions look along the whole step.
+    // Where it was at the start of this frame.
     Vector3 previousPosition;
 
     Vector3 velocity;
     float lifeTime;
 
-    // Set from whoever fired it: our own lasers from our build, everyone else's
-    // from the size the server stamped on the packet.
+    // Set from whoever fired it: our own lasers from our build.
     float radius = LASER_HIT_RADIUS;
 
     // How many more things this laser can pass through before it stops.
     int pierceLeft = 0;
 
-    // Steers toward whatever it is nearest. Set from the weapon that fired it, so
-    // other people's lasers curve on our screen too.
+    // Steers toward whatever it is nearest.
     bool homing = false;
 
-    // What this laser does. Carried per laser because a burst weapon can vary it:
-    // a Double Dipper's second laser is half its first.
+    // What this laser does. Carried per laser because a burst weapon can vary it.
     float damage = BASE_DAMAGE;
 };
 
 // The most lasers waiting on a burst at once, across every ship in sight.
 #define MAX_PENDING_LASERS 256
 
-// A laser from a burst weapon that has not left the barrel yet. The whole pull is
-// laid out when the trigger goes down, and the later bursts wait here.
+// A laser from a burst weapon that has not left the barrel yet.
 struct PendingLaser {
     bool active = false;
     double dueTime = 0.0;
@@ -85,29 +75,24 @@ struct PlayerIndicator {
     Vector3 position;
     const char* name;
 
-    // Server-stamped, so the bar is what that ship really has left. A negative max
-    // means we have not heard yet and should draw nothing.
+    // Server-stamped, so the bar is what that ship really has left.
     float health;
     float maxHealth;
     int level;
 
-    // Their weapon conceals who they are. The marker still shows, so they can be
-    // seen and laser at; it is the name that is withheld.
+    // Their weapon conceals who they are.
     bool nameHidden;
 };
 
-// Everything the frame needs to know about one asteroid, gathered once per
-// update so that rendering and both collision passes share the work.
+// Everything the frame needs to know about one asteroid, gathered once per update.
 struct AsteroidFrame {
-    // The server's id. Entries get shuffled as asteroids are hit, so anything kept
-    // past this frame has to use the id rather than the slot.
+    // The server's id. Entries get shuffled as asteroids are hit.
     uint32_t Id;
     Vector3 Position;
     Matrix Rotation;
     float Scale;
 
-    // Reaches every corner, so it never misses a hit. Rejects far-off asteroids
-    // before the real test runs.
+    // Reaches every corner, so it never misses a hit.
     float Radius;
 
     // The rock's actual bulk, used for the test itself.
@@ -123,6 +108,7 @@ public:
     void Reset();
     void Update(double delta);
     void Draw();
+    void DrawWorldBoundary(Vector3 viewer);
     void DrawPlayerModels();
 
     void DrawAsteroidModels();
@@ -135,8 +121,7 @@ public:
                         float radius = LASER_HIT_RADIUS, int pierce = 0,
                         float damage = BASE_DAMAGE, bool homing = false);
 
-    // One trigger pull, laid out in full by the shared pattern code. Anything not
-    // in the first burst is queued rather than fired now.
+    // One trigger pull, laid out in full by the shared pattern code.
     void FireVolley(Vector3 origin, const Matrix& rotation, const ShipStats& stats, int ownerId);
 
     // Releases queued burst lasers once their moment arrives.
@@ -172,11 +157,9 @@ private:
 
     PendingLaser PendingLasers[MAX_PENDING_LASERS];
 
-    // One past the highest pool slot in use, so a quiet moment costs what a quiet
-    // moment should rather than what a full pool would.
+    // One past the highest pool slot in use.
     int LaserHighWater = 0;
 
-    // Counts our own trigger pulls. Alternating patterns read it, so it keeps
-    // going up rather than resetting between weapons.
+    // Counts our own trigger pulls.
     int LocalVolleyIndex = 0;
 };

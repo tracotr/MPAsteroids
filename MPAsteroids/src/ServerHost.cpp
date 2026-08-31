@@ -4,6 +4,8 @@
 #include "include/networking/NetConstants.h"
 #include "include/Upgrades.h"
 
+#include <cstdio>
+
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -12,13 +14,52 @@
 #include <string>
 #include <thread>
 
+// Bots kept per real player, and the ceiling on the total.
+#define BOTS_PER_PLAYER 2
+#define MAX_BOTS 12
+
+// How fast a bot turns onto a target, in radians per second.
+#define BOT_TURN_RATE 2.2f
+
+// How far a bot can see, and how close it must be to shoot.
+#define BOT_SIGHT_RANGE 70.0f
+#define BOT_FIRE_RANGE 55.0f
+
+// How closely the nose must line up before firing. A cosine, so about 26 degrees.
+#define BOT_AIM_DOT 0.90f
+
+// Fraction of bot shots allowed to land. The rest deliberately miss.
+#define BOT_ACCURACY 0.6f
+
+// Bots fly slower than their build allows, so a player can always run.
+#define BOT_SPEED_SCALE 0.7f
+
+// Where a bot turns back, kept inside the barrier.
+#define BOT_LEASH_RADIUS (WORLD_RADIUS * 0.75f)
+
+// Seconds between bot trigger pulls, randomised so they do not fire in unison.
+#define BOT_FIRE_MIN_GAP 0.55
+#define BOT_FIRE_MAX_GAP 1.1
+
+// Stand-ins for the model sizes the server cannot measure.
+#define BOT_ASTEROID_RADIUS 1.15f
+#define BOT_SHIP_RADIUS 1.0f
+
+// How close a rock gets before a bot steers around it.
+#define BOT_AVOID_RANGE 14.0f
+
+// How long a bot stays on one target, so it is not re-aiming every tick.
+#define BOT_TARGET_HOLD 4.0
+
+// Rocks nearer than this are obstacles to fly around, not targets to shoot.
+#define BOT_MIN_TARGET_RANGE 16.0f
+
 #define BASE_SCORE 5
 
 // A player is a harder target than a rock, so worth more.
 #define KILL_SCORE 25
 
-// Not the same number as score. Score is the leaderboard and resets on death;
-// experience is the build, and dying only costs half of it.
+// Not the same number as score.
 #define BASE_XP 5
 #define KILL_XP 25
 
@@ -28,31 +69,28 @@
 #define XP_MULTIPLIER 3
 #endif
 
-// What a full-sized rock does to a health it runs into. An unupgraded ship has a
-// hundred, so a big asteroid still ends a run exactly as it always did.
+// What a full-sized rock does to a health it runs into.
 #define ASTEROID_RAM_DAMAGE 130.0f
 
-// How many trigger pulls of credit a ship can bank. Timing the gap exactly would
-// throw a laser away every time a frame ran late.
+// What a laser is worth against a ship. Stops the base gun one-shotting a base ship.
+#define PVP_DAMAGE_SCALE 0.4f
+
+// How many trigger pulls of credit a ship can bank
 const float FIRE_BURST_VOLLEYS = 2.0f;
 
-// How often a regenerating health tells its owner about it. Regen is gentle and the
-// bar moves slowly, so there is no reason to spend a packet every tick.
+// How often a regenerating health tells its owner about it.
 const double HEALTH_REPORT_INTERVAL = 0.2;
 
-const double SERVER_TICK_RATE = 30.0;
+const double SERVER_TICK_RATE = 20.0;
 const double SERVER_TICK_INTERVAL = 1.0 / SERVER_TICK_RATE;
 
-// Asteroid positions are sent every Nth tick, and clients keep the rocks moving in
-// between. A bigger number saves traffic but lets their guess drift further.
-const int ASTEROID_BROADCAST_EVERY = 3; // 30Hz / 3 = 10Hz
+// Asteroid positions are sent every Nth tick, and clients keep the rocks moving in between.
+const int ASTEROID_BROADCAST_EVERY = 2; // 20Hz / 2 = 10Hz
 
-// Cap on asteroids created in a single tick, so filling an empty field is spread
-// over a few frames rather than arriving as one spike.
+// Cap on asteroids created in a single tick.
 const int ASTEROID_SPAWNS_PER_TICK = 4;
 
-// Applies a bounty, rounded rather than truncated. Truncating ate the first rank
-// on cheap targets: five plus fifteen per cent is 5.75, cut back to five.
+// Applies a bounty, rounded 
 static int WithBounty(int amount, float multiplier)
 {
     return (int)(amount * multiplier + 0.5f);
@@ -68,30 +106,40 @@ struct ServerPlayer
     Matrix Rotation = MatrixIdentity();
     int Score = 0;
 
-    // The build and the health it produces, both here rather than on the client: one
-    // that owned its own build could award itself anything, and never die.
     UpgradeState Upgrades;
     float Health = 100.0f;
 
-    // Seeded per player, so two people levelling in the same instant are not
-    // handed the same three cards.
+    // Seeded per player, so two people levelling in the same instant are not handed the same three cards.
     uint32_t OfferRng = 0;
 
-    // When they last reported in, and when they were last killed. Together these
-    // stop a ship whose client has stopped running from being farmed for points.
+    // When they last reported in, and when they were last killed.
     double LastInputTime = 0.0;
     double KilledAt = -1.0;
 
-    // When something last took health off them, which is what a repair bay waits
-    // on before it starts giving any back.
+    // When something last took health off them.
     double LastDamageTime = -1000.0;
 
-    // Credit for firing, in lasers. Spent one per laser and refilled at whatever
-    // rate the build on file is entitled to.
+    // Credit for firing, in lasers. Spent one per laser and refilled 
     float FireTokens = 0.0f;
 
     // When their own health was last reported to them.
     double LastHealthReport = -1000.0;
+
+    // Bots only. The death already respawned from, so one death moves the ship once.
+    double BotHandledKillAt = -1.0;
+
+    // Bots only. Where it heads when nothing is worth shooting.
+    Vector3 BotWander = { 0.0f, 0.0f, 1.0f };
+
+    // Bots only. The earliest it may pull the trigger again.
+    double BotNextFireAt = 0.0;
+
+    // Bots only. What it has settled on shooting, and until when.
+    uint32_t BotTargetAsteroid = 0;
+    int BotTargetPlayer = -1;
+    double BotTargetUntil = 0.0;
+
+    bool IsBot = false;
 };
 
 // One switched-on cube of the play area.
@@ -101,8 +149,7 @@ struct RegionCell
     double LastOccupied = 0.0;
 };
 
-// The server's own record of an asteroid, separate from the version sent to
-// clients because it holds things they never need.
+// The server's own record of an asteroid, separate from the version sent to clients.
 struct ServerAsteroid
 {
     bool Active = false;
@@ -112,8 +159,7 @@ struct ServerAsteroid
     Vector3 Velocity = { 0.0f, 0.0f, 0.0f };
     float Scale = 1.0f;
 
-    // Worked out from Scale whenever the rock is made or resized, so its size and
-    // its toughness cannot drift apart.
+    // Worked out from Scale whenever the rock is made or resized.
     float Health = 0.0f;
 
     double LastHitTime = -1.0;
@@ -165,8 +211,7 @@ private:
     RegionCell regionCells[MAX_REGION_CELLS] = {};
     int regionCellCount = 0;
 
-    // Never reused, so a client can tell an asteroid that moved apart from a
-    // different one that took over its old slot.
+    // Never reused, so a client can tell an asteroid that moved apart from a different one that took over its old slot.
     uint32_t nextAsteroidId = 1;
 
     static double GetClockSeconds()
@@ -182,8 +227,7 @@ private:
         return dist(gen);
     }
 
-    // Throws away points outside the sphere and tries again, which spreads the
-    // directions evenly. Scaling each axis instead bunches them at the corners.
+    // Throws away points outside the sphere and tries again, which spreads the directions evenly.
     Vector3 RandomDirection()
     {
         for (int attempt = 0; attempt < 12; ++attempt)
@@ -196,17 +240,52 @@ private:
         return (Vector3){ 0.0f, 0.0f, 1.0f };
     }
 
-    // Players actually in the world, not just ones with a socket open. Counting a
-    // player who has not sent a position yet would leave rocks nowhere to go.
-    int ActivePlayerCount() const
+    // Counts real people. Bots hold player slots, so they have to be skipped.
+    int HumanCount() const
     {
         int count = 0;
         for (int i = 0; i < MAX_PLAYERS; ++i)
         {
-            if (players[i].Active && players[i].ValidPosition)
+            if (players[i].Active && !players[i].IsBot)
                 count++;
         }
         return count;
+    }
+
+    int BotCount() const
+    {
+        int count = 0;
+        for (int i = 0; i < MAX_PLAYERS; ++i)
+        {
+            if (players[i].Active && players[i].IsBot)
+                count++;
+        }
+        return count;
+    }
+
+    // Bots fill from the top down, people from the bottom up.
+    int AllocateBotSlot() const
+    {
+        for (int i = MAX_PLAYERS - 1; i >= 0; --i)
+        {
+            if (!players[i].Active)
+                return i;
+        }
+        return -1;
+    }
+
+    // Frees the highest bot slot so an arriving player is never turned away.
+    int EvictOneBot()
+    {
+        for (int i = MAX_PLAYERS - 1; i >= 0; --i)
+        {
+            if (players[i].Active && players[i].IsBot)
+            {
+                DisconnectPlayer(i);
+                return i;
+            }
+        }
+        return -1;
     }
 
     int AllocateAsteroid()
@@ -285,8 +364,7 @@ private:
         regionCellCount++;
     }
 
-    // Switches on the eight cubes meeting at the nearest grid corner, so a player
-    // near an edge does not end up with world on one side and nothing on the other.
+    // Switches on the eight cubes meeting at the nearest grid corner.
     void TouchRegionAround(const Vector3& position, double now)
     {
         const int cx = (int)roundf(position.x / REGION_CELL_SIZE);
@@ -348,8 +426,7 @@ private:
         return (closest == MAX_SQR_V3) ? -1.0f : sqrtf(closest);
     }
 
-    // Looks for a spot in the cube with room around it, so an asteroid is never
-    // put back into play on top of somebody.
+    // Looks for a spot in the cube with room around it.
     Vector3 PickPlacementInCell(int index)
     {
         Vector3 best = RandomPointInCell(index);
@@ -376,8 +453,7 @@ private:
 
     int DesiredAsteroidCount() const
     {
-        // Scales with how much world is switched on, not with how many players
-        // are connected, so the field feels the same however far people spread.
+        // Scales with how much world is switched on, not with how many players are connected.
         int desired = regionCellCount * ASTEROID_PER_CELL;
         if (desired > ASTEROID_MAX_TOTAL) desired = ASTEROID_MAX_TOTAL;
         if (desired > MAX_ASTEROIDS) desired = MAX_ASTEROIDS;
@@ -421,8 +497,7 @@ private:
         return emptiest;
     }
 
-    // Tops the field up, always filling whichever cube has fewest, so somebody who
-    // has just arrived somewhere new is not left in an empty sky.
+    // Tops the field up, always filling whichever cube has fewest.
     void MaintainAsteroidPopulation()
     {
         const int desired = DesiredAsteroidCount();
@@ -454,8 +529,7 @@ private:
         }
     }
 
-    // Takes a bite out of a rock, breaking it only once nothing is left. Returns
-    // true for the laser that finished it, which is what decides who is paid.
+    // Takes a bite out of a rock, breaking it only once nothing is left.
     bool DamageAsteroid(uint32_t asteroidId, float damage)
     {
         int slot = FindAsteroidById(asteroidId);
@@ -479,23 +553,20 @@ private:
 
         double now = GetClockSeconds();
 
-        // A guard here used to ignore repeat reports within a tenth of a second.
-        // Reports are single lasers now, and a shotgun lands ten in one frame.
         ServerAsteroid parent = asteroids[slot];
 
-        // Freed before the fragments are allocated, so a split never has to
-        // compete with its own parent for a slot.
+        // Freed before the fragments are allocated.
         ReleaseAsteroid(slot);
 
         float childScale = parent.Scale * ASTEROID_SPLIT_FACTOR;
         if (childScale < MIN_ASTEROID_SCALE)
-            return true; // Too small to be worth splitting: it just shatters.
+            return true;
 
-        // The two pieces are pushed out sideways from the direction the rock was
-        // going, so they visibly fly apart instead of following its old path.
+        // The two pieces are pushed out sideways from the direction the rock was going
         Vector3 tangent = Vector3CrossProduct(parent.Velocity, RandomDirection());
         if (Vector3LengthSqr(tangent) < 0.0001f)
             tangent = (Vector3){ 1.0f, 0.0f, 0.0f };
+
         tangent = Vector3Normalize(tangent);
 
         Vector3 separation = Vector3Scale(tangent, parent.Scale * 1.1f);
@@ -523,7 +594,7 @@ private:
     {
         for (int i = 0; i < MAX_PLAYERS; ++i)
         {
-            if (!players[i].Active || i == exceptPlayerId)
+            if (!players[i].Active || players[i].IsBot || i == exceptPlayerId)
                 continue;
 
             wsServer.Send(players[i].ConnId, data, len);
@@ -532,6 +603,9 @@ private:
 
     void SendPacketToOnly(const void* data, size_t len, int playerId)
     {
+        if (!players[playerId].Active || players[playerId].IsBot)
+            return;
+        
         wsServer.Send(players[playerId].ConnId, data, len);
     }
 
@@ -550,11 +624,9 @@ private:
         SendPacketToAllBut(&buffer, sizeof(buffer), -1);
     }
 
-    // Everything below stamps or derives from server-held state. None of it
-    // trusts a number that arrived from a client.
+    // Everything below stamps or derives from server-held state.
 
-    // The fields a client may not describe about itself. Called on every outbound
-    // PlayerPacket, so a health or a level reaches nobody except from here.
+    // The fields a client may not describe about itself.
     void StampPlayerState(PlayerPacket& packet, int playerId)
     {
         packet.Health = players[playerId].Health;
@@ -565,6 +637,9 @@ private:
 
     void SendHealth(int playerId, double now)
     {
+        if (!players[playerId].Active || players[playerId].IsBot)
+            return;
+
         players[playerId].LastHealthReport = now;
 
         PlayerHealthPacket buffer = {};
@@ -574,10 +649,12 @@ private:
         SendPacketToOnly(&buffer, sizeof(buffer), playerId);
     }
 
-    // Rolls a fresh offer first if one is owed, so a client is never told a pick
-    // is waiting without also being told what the pick is between.
+    // Rolls a fresh offer first if one is owed.
     void SendUpgradeState(int playerId)
     {
+        if (!players[playerId].Active || players[playerId].IsBot)
+            return;
+        
         UpgradeState& state = players[playerId].Upgrades;
 
         if (state.PendingPicks() > 0 && state.OfferCount() == 0)
@@ -588,14 +665,12 @@ private:
         SendPacketToOnly(&buffer, sizeof(buffer), playerId);
     }
 
-    // All experience is awarded here, so one multiplier retunes the pace. Bounty
-    // applies to it as well as score, and so compounds into more picks.
+    // All experience is awarded here
     void GrantXp(int playerId, int amount)
     {
         const float multiplier = players[playerId].Upgrades.Stats().ScoreMultiplier;
 
-        // Levelling only ever hands out a pick. Nothing about the ship changes
-        // until the player actually chooses something.
+        // Levelling only ever hands out a pick.
         players[playerId].Upgrades.AddXp(WithBounty(amount, multiplier) * XP_MULTIPLIER);
         SendUpgradeState(playerId);
     }
@@ -609,8 +684,7 @@ private:
     {
         players[victimId].KilledAt = now;
 
-        // Dying costs the whole score but only half the build, so a good run
-        // still leaves something behind to fly back out on.
+        // Dying costs the whole score but only half the build
         players[victimId].Score = 0;
         players[victimId].Upgrades.ApplyDeathPenalty();
         players[victimId].Health = players[victimId].Upgrades.Stats().MaxHealth;
@@ -623,8 +697,7 @@ private:
             GrantXp(killerId, KILL_XP);
         }
 
-        // The victim is told so it can respawn; it had no way to know, since the
-        // laser was judged on the shooter's screen.
+        // The victim is told so it can respawn
         PlayerKillPacket notify = {};
         notify.Command = static_cast<int>(NetworkCommands::PlayerKilled);
         notify.KillerId = killerId;
@@ -636,8 +709,12 @@ private:
         UpdateScoreboard();
     }
 
-    // Every point of damage arrives here, which is why armour is applied here
-    // rather than at the call sites. It does not care what the damage was.
+    // Every point of damage arrives here.
+    float LaserDamageToPlayer(int shooterId) const
+    {
+        return players[shooterId].Upgrades.Stats().Damage * PVP_DAMAGE_SCALE;
+    }
+
     void ApplyDamage(int victimId, float amount, int killerId, double now)
     {
         amount *= players[victimId].Upgrades.Stats().DamageTakenScale;
@@ -657,8 +734,7 @@ private:
         KillPlayer(victimId, killerId, now);
     }
 
-    // Stops an abandoned ship being farmed: a client not running frames never
-    // processes its respawn, so it sits there as a free target.
+    // Stops an abandoned ship being farmed: a client not running frames never processes its respawn.
     bool CanBeHurt(int victimId, double now) const
     {
         if (victimId < 0 || victimId >= MAX_PLAYERS || !players[victimId].Active)
@@ -673,8 +749,7 @@ private:
         return true;
     }
 
-    // Health comes back only after a stretch with nothing hitting us, so a repair
-    // bay decides what happens between fights rather than during one.
+    // Health comes back only after a stretch with nothing hitting us.
     void UpdatePlayers(double delta)
     {
         const double now = GetClockSeconds();
@@ -686,8 +761,7 @@ private:
 
             const ShipStats& stats = players[i].Upgrades.Stats();
 
-            // Credit builds up even while nobody is firing, which is what lets a
-            // pull leave immediately after a pause.
+            // Credit builds up even while nobody is firing.
             const float perSecond = (float)(1.0 / stats.FireCooldown);
             const float ceiling = FIRE_BURST_VOLLEYS;
             players[i].FireTokens += perSecond * (float)delta;
@@ -704,6 +778,387 @@ private:
 
             if (now - players[i].LastHealthReport >= HEALTH_REPORT_INTERVAL)
                 SendHealth(i, now);
+        }
+    }
+
+    // Builds a rotation facing this way. The ship model faces -Z, hence the negation.
+    static Matrix RotationFacing(Vector3 forward)
+    {
+        if (Vector3LengthSqr(forward) < 0.0001f)
+            return MatrixIdentity();
+
+        forward = Vector3Normalize(forward);
+
+        Vector3 zAxis = Vector3Negate(forward);
+        Vector3 upHint = (fabsf(zAxis.y) > 0.99f) ? (Vector3){ 1.0f, 0.0f, 0.0f }
+                                                  : (Vector3){ 0.0f, 1.0f, 0.0f };
+
+        Vector3 xAxis = Vector3Normalize(Vector3CrossProduct(upHint, zAxis));
+        Vector3 yAxis = Vector3CrossProduct(zAxis, xAxis);
+
+        Matrix result = MatrixIdentity();
+        result.m0 = xAxis.x; result.m1 = xAxis.y; result.m2 = xAxis.z;
+        result.m4 = yAxis.x; result.m5 = yAxis.y; result.m6 = yAxis.z;
+        result.m8 = zAxis.x; result.m9 = zAxis.y; result.m10 = zAxis.z;
+        return result;
+    }
+
+    // Reads which way a ship faces. The model faces -Z.
+    static Vector3 FacingOf(const Matrix& rotation)
+    {
+        return Vector3Normalize(Vector3Transform((Vector3){ 0.0f, 0.0f, -1.0f }, rotation));
+    }
+
+    // Takes a random card from the offer, since a bot has no screen to choose on.
+    void TakeBotUpgrades(int botId)
+    {
+        UpgradeState& state = players[botId].Upgrades;
+
+        // Bounded, so a card that will not apply cannot spin the whole tick.
+        for (int guard = 0; guard < MAX_UPGRADE_PICKS && state.PendingPicks() > 0; ++guard)
+        {
+            if (state.OfferCount() == 0)
+                state.RollOffer(players[botId].OfferRng);
+
+            if (state.OfferCount() == 0)
+                break;
+
+            const int index = (int)RandBetween(0.0f, (float)state.OfferCount() - 0.001f);
+            if (!state.Choose(state.OfferedId(index)))
+                break;
+
+            players[botId].Health = state.Stats().MaxHealth;
+        }
+    }
+
+    // Applies ram damage to a bot, which has no client to report the collision.
+    bool ResolveBotRam(int botId, double now)
+    {
+        for (int a = 0; a < MAX_ASTEROIDS; ++a)
+        {
+            if (!asteroids[a].Active)
+                continue;
+
+            const float reach = asteroids[a].Scale * BOT_ASTEROID_RADIUS + BOT_SHIP_RADIUS;
+            if (Vector3DistanceSqr(asteroids[a].Position, players[botId].Position) > reach * reach)
+                continue;
+
+            const float damage = ASTEROID_RAM_DAMAGE * asteroids[a].Scale;
+            const uint32_t id = asteroids[a].Id;
+
+            if (!BreakAsteroid(id))
+                return false;
+
+            ApplyDamage(botId, damage, -1, now);
+            return true;
+        }
+        return false;
+    }
+
+    // Keeps the bot count at two per player as people come and go.
+    void MaintainBotPopulation()
+    {
+        int wanted = HumanCount() * BOTS_PER_PLAYER;
+        if (wanted > MAX_BOTS)
+            wanted = MAX_BOTS;
+
+        int have = BotCount();
+
+        for (; have < wanted; ++have)
+        {
+            if (InitializeNewBot() == -1)
+                break;
+        }
+
+        // Releases the newest first, so the bot block stays against the top.
+        while (have > wanted)
+        {
+            int newest = -1;
+            for (int i = 0; i < MAX_PLAYERS; ++i)
+            {
+                if (players[i].Active && players[i].IsBot)
+                {
+                    newest = i;
+                    break;
+                }
+            }
+
+            if (newest == -1)
+                break;
+
+            DisconnectPlayer(newest);
+            have--;
+        }
+    }
+
+    // Drives every bot: steering, firing, upgrades and respawn.
+    void UpdateBots(double delta)
+    {
+        const double now = GetClockSeconds();
+
+        for (int i = 0; i < MAX_PLAYERS; ++i)
+        {
+            ServerPlayer& bot = players[i];
+            if (!bot.Active || !bot.IsBot)
+                continue;
+
+            // Stops CanBeHurt reading a bot as an abandoned ship and making it unkillable.
+            bot.LastInputTime = now;
+
+            // Moves the ship after a death, which is what a client does on PlayerKilled.
+            if (bot.KilledAt > 0.0 && bot.KilledAt != bot.BotHandledKillAt)
+            {
+                bot.BotHandledKillAt = bot.KilledAt;
+                bot.Position = Vector3Scale(RandomDirection(), RandBetween(8.0f, PLAYER_SPAWN_RADIUS));
+                bot.BotWander = RandomDirection();
+            }
+
+            TakeBotUpgrades(i);
+
+            const ShipStats& stats = bot.Upgrades.Stats();
+            const Vector3 facing = FacingOf(bot.Rotation);
+
+            // --- pick the nearest thing worth shooting ----------------------
+            Vector3 targetPoint = { 0.0f, 0.0f, 0.0f };
+            Vector3 targetVelocity = { 0.0f, 0.0f, 0.0f };
+            float targetDistance = BOT_SIGHT_RANGE;
+            int targetPlayer = -1;
+            uint32_t targetAsteroid = 0;
+
+            // The nearest rock ahead, tracked separately: it is the thing to fly around.
+            Vector3 avoidFrom = { 0.0f, 0.0f, 0.0f };
+            float avoidDistance = BOT_AVOID_RANGE;
+            bool avoiding = false;
+
+            for (int a = 0; a < MAX_ASTEROIDS; ++a)
+            {
+                if (!asteroids[a].Active)
+                    continue;
+
+                const Vector3 toRock = Vector3Subtract(asteroids[a].Position, bot.Position);
+                const float distance = Vector3Length(toRock);
+
+                // This close it is an obstacle, left to the avoidance below.
+                if (distance > BOT_MIN_TARGET_RANGE && distance < targetDistance)
+                {
+                    targetDistance = distance;
+                    targetPoint = asteroids[a].Position;
+                    targetVelocity = asteroids[a].Velocity;
+                    targetAsteroid = asteroids[a].Id;
+                    targetPlayer = -1;
+                }
+
+                // Only what is ahead is worth dodging.
+                if (distance > 0.0001f
+                    && Vector3DotProduct(facing, Vector3Scale(toRock, 1.0f / distance)) > 0.2f)
+                {
+                    const float clearance = distance - asteroids[a].Scale * BOT_ASTEROID_RADIUS;
+                    if (clearance < avoidDistance)
+                    {
+                        avoidDistance = clearance;
+                        avoidFrom = asteroids[a].Position;
+                        avoiding = true;
+                    }
+                }
+            }
+
+            for (int other = 0; other < MAX_PLAYERS; ++other)
+            {
+                if (other == i || !players[other].Active || !players[other].ValidPosition)
+                    continue;
+
+                // Bots leave each other alone and only ever target people.
+                if (players[other].IsBot)
+                    continue;
+
+                const float distance = Vector3Distance(bot.Position, players[other].Position);
+                if (distance < targetDistance)
+                {
+                    targetDistance = distance;
+                    targetPoint = players[other].Position;
+
+                    // Players are not led: the server never sees their velocity.
+                    targetVelocity = (Vector3){ 0.0f, 0.0f, 0.0f };
+                    targetPlayer = other;
+                    targetAsteroid = 0;
+                }
+            }
+
+            // A target already settled on beats whatever is nearest this tick.
+            if (now < bot.BotTargetUntil)
+            {
+                bool held = false;
+
+                if (bot.BotTargetAsteroid != 0)
+                {
+                    const int slot = FindAsteroidById(bot.BotTargetAsteroid);
+                    if (slot != -1)
+                    {
+                        const float distance = Vector3Distance(bot.Position, asteroids[slot].Position);
+                        if (distance > BOT_MIN_TARGET_RANGE && distance < BOT_SIGHT_RANGE)
+                        {
+                            targetPoint = asteroids[slot].Position;
+                            targetVelocity = asteroids[slot].Velocity;
+                            targetDistance = distance;
+                            targetAsteroid = asteroids[slot].Id;
+                            targetPlayer = -1;
+                            held = true;
+                        }
+                    }
+                }
+                else if (bot.BotTargetPlayer >= 0
+                      && players[bot.BotTargetPlayer].Active
+                      && players[bot.BotTargetPlayer].ValidPosition
+                      && !players[bot.BotTargetPlayer].IsBot)
+                {
+                    const float distance = Vector3Distance(bot.Position, players[bot.BotTargetPlayer].Position);
+                    if (distance < BOT_SIGHT_RANGE)
+                    {
+                        targetPoint = players[bot.BotTargetPlayer].Position;
+                        targetVelocity = (Vector3){ 0.0f, 0.0f, 0.0f };
+                        targetDistance = distance;
+                        targetPlayer = bot.BotTargetPlayer;
+                        targetAsteroid = 0;
+                        held = true;
+                    }
+                }
+
+                // Shot to pieces or left behind, so pick again.
+                if (!held)
+                    bot.BotTargetUntil = 0.0;
+            }
+
+            // Nothing held, so take what the scan found and stay on it.
+            if (now >= bot.BotTargetUntil && (targetAsteroid != 0 || targetPlayer != -1))
+            {
+                bot.BotTargetAsteroid = targetAsteroid;
+                bot.BotTargetPlayer = targetPlayer;
+                bot.BotTargetUntil = now + BOT_TARGET_HOLD;
+            }
+
+            const bool hasTarget = (targetPlayer != -1 || targetAsteroid != 0);
+
+            // Aims where the rock will be, since the laser takes time to arrive.
+            Vector3 aimPoint = targetPoint;
+            if (hasTarget && stats.LaserSpeed > 0.01f)
+            {
+                const float flightTime = targetDistance / stats.LaserSpeed;
+                aimPoint = Vector3Add(targetPoint, Vector3Scale(targetVelocity, flightTime));
+            }
+
+            // --- decide which way to point ----------------------------------
+            Vector3 desired = bot.BotWander;
+
+            if (Vector3Length(bot.Position) > BOT_LEASH_RADIUS)
+            {
+                // Too far out. Coming home beats any target.
+                desired = Vector3Normalize(Vector3Negate(bot.Position));
+                bot.BotWander = desired;
+            }
+            else if (hasTarget)
+            {
+                const Vector3 toTarget = Vector3Subtract(aimPoint, bot.Position);
+                if (Vector3LengthSqr(toTarget) > 0.0001f)
+                    desired = Vector3Normalize(toTarget);
+            }
+            else if (RandBetween(0.0f, 1.0f) < (float)delta * 0.5f)
+            {
+                // Nothing about. Drift somewhere new every couple of seconds.
+                bot.BotWander = RandomDirection();
+                desired = bot.BotWander;
+            }
+
+            // Blended rather than replacing, so the bot slides past instead of stopping.
+            if (avoiding)
+            {
+                const Vector3 away = Vector3Subtract(bot.Position, avoidFrom);
+                if (Vector3LengthSqr(away) > 0.0001f)
+                {
+                    const float urgency = 1.0f - (avoidDistance / BOT_AVOID_RANGE);
+                    desired = Vector3Normalize(Vector3Lerp(desired, Vector3Normalize(away), urgency));
+                }
+            }
+
+            // Turns at a fixed rate rather than snapping, so it comes around like a flown ship.
+            float alignment = Vector3DotProduct(facing, desired);
+            alignment = alignment > 1.0f ? 1.0f : (alignment < -1.0f ? -1.0f : alignment);
+
+            const float angle = acosf(alignment);
+            const float step = BOT_TURN_RATE * (float)delta;
+
+            Vector3 heading = desired;
+            if (angle > step && angle > 0.0001f)
+                heading = Vector3Normalize(Vector3Lerp(facing, desired, step / angle));
+
+            bot.Rotation = RotationFacing(heading);
+            bot.Position = Vector3Add(bot.Position,
+                                      Vector3Scale(heading, stats.TopSpeed * BOT_SPEED_SCALE * (float)delta));
+
+            // The barrier holds a bot as it holds a player.
+            const float botFromCentre = Vector3Length(bot.Position);
+            if (botFromCentre > WORLD_RADIUS)
+                bot.Position = Vector3Scale(bot.Position, WORLD_RADIUS / botFromCentre);
+
+            // Flying into one still costs, exactly as it does for a player.
+            ResolveBotRam(i, now);
+
+            // --- shoot ------------------------------------------------------
+            bool aimed = false;
+            if (hasTarget && targetDistance < BOT_FIRE_RANGE)
+            {
+                const Vector3 toTarget = Vector3Subtract(aimPoint, bot.Position);
+                if (Vector3LengthSqr(toTarget) > 0.0001f)
+                    aimed = Vector3DotProduct(heading, Vector3Normalize(toTarget)) > BOT_AIM_DOT;
+            }
+
+            if (aimed && now >= bot.BotNextFireAt && bot.FireTokens >= 1.0f)
+            {
+                bot.FireTokens -= 1.0f;
+                bot.BotNextFireAt = now + RandBetween((float)BOT_FIRE_MIN_GAP, (float)BOT_FIRE_MAX_GAP);
+
+                // The same packet a client sends, so a bot laser draws like anyone else's.
+                VolleyPacket volley = {};
+                volley.Command = static_cast<int>(NetworkCommands::FireVolley);
+                volley.PlayerID = i;
+                volley.Position = bot.Position;
+                volley.Forward = heading;
+                volley.Up = (Vector3){ 0.0f, 1.0f, 0.0f };
+                volley.Speed = stats.LaserSpeed;
+                volley.Radius = stats.LaserRadius;
+                volley.Lifetime = stats.LaserLifetime;
+                volley.WeaponId = bot.Upgrades.WeaponEvolution();
+
+                // -1: no client owns this ship, so the volley goes to everyone.
+                SendPacketToAllBut(&volley, sizeof(volley), -1);
+
+                // Nobody reports a bot's hits, so they are settled here.
+                if (RandBetween(0.0f, 1.0f) < BOT_ACCURACY)
+                {
+                    if (targetAsteroid != 0)
+                    {
+                        if (DamageAsteroid(targetAsteroid, stats.Damage))
+                        {
+                            AwardScore(i, BASE_SCORE);
+                            GrantXp(i, BASE_XP);
+                            UpdateScoreboard();
+                        }
+                    }
+                    else if (targetPlayer != -1 && CanBeHurt(targetPlayer, now))
+                    {
+                        ApplyDamage(targetPlayer, LaserDamageToPlayer(i), i, now);
+                    }
+                }
+            }
+
+            // --- tell everyone where it went --------------------------------
+            PlayerPacket move = {};
+            move.Command = static_cast<int>(NetworkCommands::UpdatePlayer);
+            move.Id = i;
+            std::strncpy(move.Name, bot.Name, sizeof(move.Name) - 1);
+            move.Position = bot.Position;
+            move.Rotation = bot.Rotation;
+            StampPlayerState(move, i);
+            SendPacketToAllBut(&move, sizeof(move), -1);
         }
     }
 
@@ -726,7 +1181,11 @@ private:
                 break;
         }
 
+        // Nothing free, but a bot is not worth a person.
         if (playerId == MAX_PLAYERS)
+            playerId = EvictOneBot();
+
+        if (playerId < 0 || playerId >= MAX_PLAYERS)
         {
             wsServer.Disconnect(connId);
             return -1;
@@ -734,6 +1193,9 @@ private:
 
         players[playerId].Active = true;
         players[playerId].ValidPosition = false;
+
+        // This slot may have just been a bot, and the server would keep flying it.
+        players[playerId].IsBot = false;
         players[playerId].ConnId = connId;
         std::memset(players[playerId].Name, 0, sizeof(players[playerId].Name));
         players[playerId].Position = { 0.0f, 0.0f, 0.0f };
@@ -748,8 +1210,7 @@ private:
         players[playerId].LastHealthReport = -1000.0;
         players[playerId].FireTokens = 0.0f;
 
-        // Seeded from the slot and the clock together, so two people joining in
-        // the same moment do not walk the same sequence of offers.
+        // Seeded from the slot and the clock together.
         players[playerId].OfferRng = (uint32_t)(playerId * 2654435761u)
                                    ^ (uint32_t)(GetClockSeconds() * 1000.0);
 
@@ -758,8 +1219,7 @@ private:
         acceptBuffer.Id = playerId;
         SendPacketToOnly(&acceptBuffer, sizeof(acceptBuffer), playerId);
 
-        // Sent after the accept, so the client knows which id the build belongs
-        // to before it is handed one.
+        // Sent after the accept, so the client knows which id the build belongs to before it is handed one.
         SendUpgradeState(playerId);
         SendHealth(playerId, GetClockSeconds());
 
@@ -780,6 +1240,66 @@ private:
             SendPacketToOnly(&otherBuffer, sizeof(otherBuffer), playerId);
         }
 
+        return playerId;
+    }
+
+    // Named here rather than Names.cpp, which needs raylib the server does not link.
+    void MakeBotName(char* out, size_t size, int slot)
+    {
+        static const char* const kAdjectives[] = {
+            "Rusty", "Drifting", "Quiet", "Salvage", "Orbit", "Hollow", "Idle", "Stray"
+        };
+        static const char* const kNouns[] = {
+            "Hauler", "Prospector", "Tug", "Skiff", "Runner", "Lander", "Scow", "Rig"
+        };
+
+        const int a = (int)(RandBetween(0.0f, (float)(sizeof(kAdjectives) / sizeof(kAdjectives[0]) - 0.001f)));
+        const int n = (int)(RandBetween(0.0f, (float)(sizeof(kNouns) / sizeof(kNouns[0]) - 0.001f)));
+        std::snprintf(out, size, "%s%s%02d", kAdjectives[a], kNouns[n], slot % 100);
+    }
+
+    // Puts a bot in a player slot. Skips the sends a joining client would get.
+    int InitializeNewBot()
+    {
+        // From the top, so a bot never takes an arriving player's slot.
+        const int playerId = AllocateBotSlot();
+        if (playerId == -1)
+            return -1;
+
+        players[playerId] = ServerPlayer{};
+        players[playerId].Active = true;
+        players[playerId].IsBot = true;
+
+        // -1 is the no-connection value used everywhere else.
+        players[playerId].ConnId = -1;
+
+        // No PlayerPacket arrives for a bot, so its name and position are set here.
+        MakeBotName(players[playerId].Name, sizeof(players[playerId].Name), playerId);
+        players[playerId].Position = Vector3Scale(RandomDirection(), RandBetween(8.0f, PLAYER_SPAWN_RADIUS));
+
+        // Pointed at the middle on arrival, like a player respawning.
+        players[playerId].Rotation = RotationFacing(Vector3Negate(players[playerId].Position));
+
+        // Marks the slot as one the server simulates.
+        players[playerId].ValidPosition = true;
+        players[playerId].LastInputTime = GetClockSeconds();
+
+        players[playerId].Upgrades.Reset();
+        players[playerId].Health = players[playerId].Upgrades.Stats().MaxHealth;
+        players[playerId].OfferRng = (uint32_t)(playerId * 2654435761u)
+                                   ^ (uint32_t)(GetClockSeconds() * 1000.0);
+
+        // The announcement a human triggers on their first position report.
+        PlayerPacket addPacket = {};
+        addPacket.Command = static_cast<int>(NetworkCommands::AddPlayer);
+        addPacket.Id = playerId;
+        std::strncpy(addPacket.Name, players[playerId].Name, sizeof(addPacket.Name) - 1);
+        addPacket.Position = players[playerId].Position;
+        addPacket.Rotation = players[playerId].Rotation;
+        StampPlayerState(addPacket, playerId);
+        SendPacketToAllBut(&addPacket, sizeof(addPacket), playerId);
+
+        UpdateScoreboard();
         return playerId;
     }
 
@@ -805,8 +1325,7 @@ private:
     {
         const double now = GetClockSeconds();
 
-        // The world tracks where people actually are: a cube switches on under
-        // each player and switches off once it has been empty for a while.
+        // The world tracks where people actually are.
         for (int i = 0; i < MAX_PLAYERS; ++i)
         {
             if (players[i].Active && players[i].ValidPosition)
@@ -829,8 +1348,7 @@ private:
             if (IsInsideRegion(asteroid.Position))
                 continue;
 
-            // Outside the world. Leave it be until it is far enough away that
-            // moving it cannot be seen happening.
+            // Outside the world. Leave it be until it is far enough away that moving it cannot be seen happening.
             float distance = DistanceToNearestPlayer(asteroid.Position);
             if (distance >= 0.0f && distance < ASTEROID_RELOCATE_DISTANCE)
                 continue;
@@ -843,7 +1361,11 @@ private:
             }
 
             // Put back somewhere in the world with room around it.
-            asteroid.Position = PickPlacementInCell(EmptiestRegionCell());
+            const int destination = EmptiestRegionCell();
+            if (destination < 0)
+                continue;
+
+            asteroid.Position = PickPlacementInCell(destination);
             asteroid.Velocity = Vector3Scale(RandomDirection(), RandBetween(1.2f, 3.2f));
         }
 
@@ -855,8 +1377,7 @@ private:
         BroadcastAsteroids();
     }
 
-    // Only asteroids that actually exist are sent, and the packet is cut down to
-    // fit just those; see AsteroidPacketSize.
+
     void BroadcastAsteroids()
     {
         AsteroidInfoPacket buffer = {};
@@ -895,13 +1416,18 @@ private:
 
         bool wasFirstUpdate = !players[playerId].ValidPosition;
 
-        players[playerId].Position = received.Position;
+        // Clamped here too, so a client ignoring the barrier cannot escape the world.
+        Vector3 reported = received.Position;
+        const float fromCentre = Vector3Length(reported);
+        if (fromCentre > WORLD_RADIUS)
+            reported = Vector3Scale(reported, WORLD_RADIUS / fromCentre);
+
+        players[playerId].Position = reported;
         players[playerId].Rotation = received.Rotation;
         players[playerId].ValidPosition = true;
         players[playerId].LastInputTime = GetClockSeconds();
 
-        // Announce to everyone else only once we know the player's name and
-        // position, so they never appear as an unnamed ghost.
+        // Announce to everyone else only once we know the player's name and position.
         if (wasFirstUpdate)
         {
             PlayerPacket addPacket = {};
@@ -952,18 +1478,15 @@ private:
                 AsteroidHitPacket received = {};
                 memcpy(&received, data, sizeof(AsteroidHitPacket));
 
-                // The scoring player is taken from the connection rather than the
-                // packet, so a client cannot bank points into someone else's slot.
+                // The scoring player is taken from the connection rather than the packet.
                 int playerId = GetPlayerId(connId);
                 if (playerId == -1)
                     return;
 
-                // Read from the shooter's stored build, never from the packet, so
-                // a client cannot decide for itself how hard its guns hit.
+                // Read from the shooter's stored build, never from the packet.
                 const float damage = players[playerId].Upgrades.Stats().Damage;
 
-                // Only the laser that finishes a rock is paid for it, so score
-                // still counts rocks rather than trigger pulls.
+                // Only the laser that finishes a rock is paid for it.
                 if (DamageAsteroid(received.AsteroidId, damage))
                 {
                     AwardScore(playerId, BASE_SCORE);
@@ -973,15 +1496,13 @@ private:
                 break;
             }
 
-            // Still judged by the shooter, as kills used to be. Landing one now
-            // takes health off rather than ending a run on its own.
+            // Still judged by the shooter, as kills used to be.
             case NetworkCommands::PlayerHit:
             {
                 if (len != sizeof(PlayerHitPacket))
                     return;
 
-                // The shooter is taken from the connection, so a client can only
-                // ever report its own lasers, never someone else's.
+                // The shooter is taken from the connection.
                 int shooterId = GetPlayerId(connId);
                 if (shooterId == -1)
                     return;
@@ -997,14 +1518,12 @@ private:
                 if (!CanBeHurt(victimId, now))
                     return;
 
-                // Damage is read from the shooter's own stored build rather than
-                // from the packet, so a client cannot inflate what its guns do.
-                ApplyDamage(victimId, players[shooterId].Upgrades.Stats().Damage, shooterId, now);
+                // Damage is read from the shooter's own stored build rather than from the packet.
+                ApplyDamage(victimId, LaserDamageToPlayer(shooterId), shooterId, now);
                 break;
             }
 
-            // Self-reported, and safe to be: nobody gains by claiming to have been
-            // hurt, and only the victim runs that test.
+            // nobody gains by claiming to have been hurt, and only the victim runs that test.
             case NetworkCommands::AsteroidCollision:
             {
                 if (len != sizeof(AsteroidCollisionPacket))
@@ -1021,12 +1540,10 @@ private:
                 if (slot == -1)
                     return;
 
-                // Read before the rock breaks, which frees the slot. Armour is
-                // left to ApplyDamage, or it would count twice.
+                // Read before the rock breaks, which frees the slot.
                 const float damage = ASTEROID_RAM_DAMAGE * asteroids[slot].Scale;
 
-                // Contact shatters the rock outright, or a ship tough enough to
-                // survive would sit inside it taking the hit every frame.
+                // Contact shatters the rock outright.
                 if (!BreakAsteroid(received.AsteroidId))
                     return;
 
@@ -1049,16 +1566,13 @@ private:
                 UpgradeState& state = players[playerId].Upgrades;
                 const float healthBefore = state.Stats().MaxHealth;
 
-                // Refused unless it was one of the cards actually shown. A refusal
-                // still answers, so a drifted client is corrected rather than stuck.
                 if (!state.Choose(received.UpgradeId))
                 {
                     SendUpgradeState(playerId);
                     break;
                 }
 
-                // New plating arrives as plating, not as a repair: it should help
-                // mid-fight without undoing the fight.
+                // gives health without full healing
                 players[playerId].Health += state.Stats().MaxHealth - healthBefore;
                 if (players[playerId].Health > state.Stats().MaxHealth)
                     players[playerId].Health = state.Stats().MaxHealth;
@@ -1089,8 +1603,7 @@ private:
 
                 const ShipStats& stats = players[playerId].Upgrades.Stats();
 
-                // The client says where it stood and faced; every other field is
-                // filled in here, so nobody can claim a gun they have not earned.
+                // The client says where it stood and faced; every other field is filled in here.
                 received.PlayerID = playerId;
                 received.Speed = stats.LaserSpeed;
                 received.Radius = stats.LaserRadius;
@@ -1116,10 +1629,11 @@ private:
             {
                 UpdateAsteroids(SERVER_TICK_INTERVAL);
                 UpdatePlayers(SERVER_TICK_INTERVAL);
+                MaintainBotPopulation();
+                UpdateBots(SERVER_TICK_INTERVAL);
                 nextTick += SERVER_TICK_INTERVAL;
 
-                // After a long pause the loop would otherwise race to catch up
-                // on every missed tick. Skip them and carry on from now.
+                // After a long pause the loop would otherwise race to catch up on every missed tick.
                 if (now - nextTick > SERVER_TICK_INTERVAL * 5.0)
                     nextTick = now + SERVER_TICK_INTERVAL;
             }
@@ -1129,7 +1643,10 @@ private:
                 {
                     int playerId = InitializeNewPlayer(connId);
                     if (playerId != -1)
+                    {
+                        // The tick maintains the bot population.
                         UpdateScoreboard();
+                    }
                 },
                 [this](WebSocketServer::ConnId connId, const uint8_t* data, size_t len)
                 {

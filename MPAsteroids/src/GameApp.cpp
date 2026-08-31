@@ -17,8 +17,7 @@ GameApp* GameApp::instance = nullptr;
 
 namespace
 {
-    // Without this the framebuffer keeps its initial size and the embedding page
-    // stretches it, distorting the view.
+    // Without this the framebuffer keeps its initial size and the embedding page stretches it.
     void SyncCanvasSize()
     {
         double cssWidth = 0.0, cssHeight = 0.0;
@@ -168,8 +167,7 @@ void GameApp::ProcessPlaying()
         return;
     }
 
-    // A backgrounded tab stops receiving frames, so the first one back carries a
-    // delta of however long it was hidden, which would teleport the ship.
+    // A backgrounded tab stops receiving frames.
     float delta = GetFrameTime();
     if (delta > MAX_FRAME_DELTA) delta = MAX_FRAME_DELTA;
 
@@ -188,12 +186,10 @@ void GameApp::ProcessPlaying()
     EndDrawing();
 }
 
-// Browsers only hand over pointer lock from inside a real user gesture, so it is
-// requested on the click rather than on entering the game.
+// Browsers only hand over pointer lock from inside a real user gesture.
 void GameApp::UpdateMouseCapture()
 {
-    // The browser is the authority here. DisableCursor() only asks for the lock,
-    // and the user can drop it with Escape at any time without raylib knowing.
+    // The browser is the authority here.
     EmscriptenPointerlockChangeEvent status = {};
     mouseCaptured = (emscripten_get_pointerlock_status(&status) == EMSCRIPTEN_RESULT_SUCCESS) && status.isActive;
 
@@ -211,8 +207,7 @@ void GameApp::UpdateCamera()
     camera.target = PlayerShip.Position;
     camera.up = upVector;
 
-    // A real fraction of the ship's real top speed. This used to divide a squared
-    // length by a number that was not a speed at all.
+    // A real fraction of the ship's real top speed.
     const float topSpeed = Net.GetStats().TopSpeed;
     float speedRatio = Clamp(Vector3Length(PlayerShip.Velocity) / (topSpeed > 0.0f ? topSpeed : 1.0f), 0.0f, 1.0f);
     float targetFOV = Lerp(90, 110, speedRatio);

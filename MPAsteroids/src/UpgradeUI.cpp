@@ -7,7 +7,7 @@
 namespace
 {
     const int CARD_WIDTH = 170;
-    const int CARD_HEIGHT = 40;
+    const int CARD_HEIGHT = 60;
     const int CARD_GAP = 10;
 
     const int TITLE_SIZE = 11;
@@ -15,21 +15,18 @@ namespace
     const int CARD_PADDING = 8;
     const int BADGE_SIZE = 20;
 
-    // Readable against the skybox without blacking out the game behind it, since
-    // choosing does not pause anything.
+    // Readable against the skybox without blacking out the game behind it.
     const Color CARD_FILL = { 12, 16, 26, 225 };
     const Color CARD_EDGE = { 90, 140, 200, 255 };
     const Color MILESTONE_EDGE = { 235, 180, 70, 255 };
 
-    // The two bars sit centred on the bottom edge, with the cards stacked above
-    // them, since both want the middle and the bars are always there.
+    // The two bars sit centred on the bottom edge, with the cards stacked above them.
     const int BAR_WIDTH = 400;
     const int BAR_HEIGHT = 20;
     const int BAR_GAP = 8;
     const int BAR_BOTTOM_MARGIN = 12;
 
-    // Breaks text on spaces to fit a pixel width. raylib has no wrapping for the
-    // plain DrawText path, and the descriptions are written as sentences.
+    // Breaks text on spaces to fit a pixel width. raylib has no wrapping for the plain DrawText path, and the descriptions are written as sentences.
     int WrapText(const char* text, int fontSize, int maxWidth, char lines[][64], int maxLines)
     {
         int lineCount = 0;
@@ -119,13 +116,11 @@ void UpgradeUI::Update(NetClient& net)
 {
     const UpgradeState& upgrades = net.GetUpgrades();
 
-    // Nothing to press until the server has both owed us a pick and told us what
-    // the pick is between.
+    // Nothing to press until the server has both owed us a pick and told us what the pick is between.
     if (upgrades.PendingPicks() <= 0 || upgrades.OfferCount() <= 0)
         return;
 
-    // IsKeyPressed rather than IsKeyDown: holding a key would otherwise spend
-    // every banked pick on whatever happened to be in that slot.
+    // IsKeyPressed rather than IsKeyDown.
     const int keys[UPGRADE_OFFER_COUNT] = { KEY_ONE, KEY_TWO, KEY_THREE };
 
     for (int i = 0; i < upgrades.OfferCount() && i < UPGRADE_OFFER_COUNT; i++)
@@ -133,8 +128,7 @@ void UpgradeUI::Update(NetClient& net)
         if (!IsKeyPressed(keys[i]))
             continue;
 
-        // The server decides whether this is allowed and answers with the new
-        // state. Nothing is applied locally on the strength of a keypress.
+        // The server decides whether this is allowed and answers with the new state.
         net.SendUpgradeChoice(upgrades.OfferedId(i));
         return;
     }
@@ -185,8 +179,7 @@ void UpgradeUI::Draw(NetClient& net)
     if (pending <= 0 || offerCount <= 0)
         return;
 
-    // A milestone offer is the branch choice, and is worth marking out from the
-    // ordinary run of stat cards.
+    // A milestone offer is the branch choice, and is worth marking out from the ordinary run of stat cards.
     bool milestone = false;
     for (int i = 0; i < offerCount; i++)
     {
@@ -206,8 +199,7 @@ void UpgradeUI::Draw(NetClient& net)
     DrawText(heading, (screenWidth - headingWidth) / 2, cardY - 20, 16,
              milestone ? MILESTONE_EDGE : RAYWHITE);
 
-    // Banked picks are worth saying out loud, because the next set appears the
-    // instant this one is spent and that would otherwise look like a glitch.
+    // Banked picks are worth saying out loud.
     if (pending > 1)
     {
         const char* queued = TextFormat("+%i more", pending - 1);

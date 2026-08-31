@@ -1,7 +1,6 @@
 #pragma once
 
-// Minimal WebSocket server: binary messages, no extensions, no TLS, since a proxy
-// terminates wss:// for us. Single-threaded, sized for a lobby of dozens.
+// Minimal WebSocket server: binary messages, no extensions, no TLS, since a proxy terminates wss:// for us.
 
 #include <cstdint>
 #include <cstddef>
@@ -24,8 +23,7 @@ public:
     void Stop();
     bool IsRunning() const { return listenSocket != InvalidSocketValue(); }
 
-    // Services accepts, handshakes, reads and writes, blocking at most timeoutMs
-    // and invoking the callbacks synchronously before it returns.
+    // Services accepts, handshakes, reads and writes.
     void Poll(int timeoutMs, const OnConnect& onConnect, const OnMessage& onMessage, const OnDisconnect& onDisconnect);
 
     // Queued, not sent immediately; the next Poll() flushes it.
