@@ -11,7 +11,7 @@ Mouse and keyboard both work at the same time. Click once to capture the
 pointer, and press Escape to release it.
 
 - Mouse : Pitch and yaw
-- Left click : Shoot
+- Left click : Shoot/Lock Mouse
 - W / S : Thrust forwards / backwards
 - A / D : Yaw
 - R / F : Pitch
@@ -59,6 +59,3 @@ MPAsteroids/
     ├── Caddyfile               serves the client, proxies /ws to the server
     └── provision-server.sh     one-time host setup
 ```
-
-## AI Disclosure
-AI was used for a lot of the porting of the original c++ app, to the web app. It also created the system for the upgrades, as well as general optimizations.
