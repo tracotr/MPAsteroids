@@ -5,12 +5,10 @@
 
 namespace
 {
-    // Angles are written in degrees below because that is how a cone is easier
-    // to reason about, and converted once here.
+    // Angles are written in degrees 
     constexpr float Deg(float degrees) { return degrees * 0.01745329252f; }
 
     // A burst weapon fires its lasers this far apart unless it says otherwise.
-    // Short enough to read as one pull of the trigger rather than several.
     constexpr double BURST_GAP = 0.07;
 
     // The weapons. Every figure is against the base gun, not the tier below,
@@ -29,8 +27,7 @@ namespace
         return w;
     }();
 
-    // Speed stops at 1.8 because Assassin, which this leads to, is 2.0. A tier
-    // replaces the one below, so higher here would make the upgrade a step back.
+
     const WeaponProfile SniperProfile = []
     {
         WeaponProfile w;
@@ -61,8 +58,7 @@ namespace
         return w;
     }();
 
-    // Four lasers thrown outward from the health rather than ahead of it, spaced
-    // as a plus: up, down, left, right.
+
     const WeaponProfile QuadProfile = []
     {
         WeaponProfile w;
@@ -146,7 +142,7 @@ namespace
     // --- tier three, from Quad --------------------------------------------
 
     // Sixteen positions around the ship, eight fired at a time: every other one
-    // on this pull, the ones between them on the next.
+    // on this pull, the ones between them on the next. 
     const WeaponProfile NorthStarProfile = []
     {
         WeaponProfile w;
@@ -155,14 +151,12 @@ namespace
         w.Pattern.Shape = PatternShape::Plus;
         w.Pattern.LasersPerBurst = 8;
 
-        // Eight lasers a pull, every other position on a sixteen-slot ring. The
-        // next pull takes the ones this one skipped.
+        // Eight lasers a pull, every other position
         w.Pattern.Alternates = Alternation::ByVolley;
         return w;
     }();
 
-    // Switcher came with no figures of its own, which left it strictly worse than
-    // the Quad it evolves from. It matches Quad's damage now and fires faster.
+
     const WeaponProfile SwitcherProfile = []
     {
         WeaponProfile w;
@@ -172,8 +166,7 @@ namespace
         w.Pattern.LasersPerBurst = 4;
         w.Pattern.SpreadRadians = Deg(20.0f);
 
-        // Ahead on one pull, behind on the next. Visible across pulls without
-        // help, because forward and backward are not symmetric the way a ring is.
+        // Ahead on one pull, behind on the next
         w.Pattern.Alternates = Alternation::ByVolley;
         return w;
     }();
