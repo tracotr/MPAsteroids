@@ -7,7 +7,7 @@
 namespace
 {
     const int CARD_WIDTH = 170;
-    const int CARD_HEIGHT = 40;
+    const int CARD_HEIGHT = 65;
     const int CARD_GAP = 10;
 
     const int TITLE_SIZE = 11;
