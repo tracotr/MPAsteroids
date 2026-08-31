@@ -6,11 +6,11 @@
 
 namespace
 {
-    const int CARD_WIDTH = 168;
-    const int CARD_HEIGHT = 84;
+    const int CARD_WIDTH = 170;
+    const int CARD_HEIGHT = 40;
     const int CARD_GAP = 10;
 
-    const int TITLE_SIZE = 14;
+    const int TITLE_SIZE = 11;
     const int BODY_SIZE = 10;
     const int CARD_PADDING = 8;
     const int BADGE_SIZE = 20;
@@ -23,8 +23,8 @@ namespace
 
     // The two bars sit centred on the bottom edge, with the cards stacked above
     // them, since both want the middle and the bars are always there.
-    const int BAR_WIDTH = 200;
-    const int BAR_HEIGHT = 14;
+    const int BAR_WIDTH = 400;
+    const int BAR_HEIGHT = 20;
     const int BAR_GAP = 8;
     const int BAR_BOTTOM_MARGIN = 12;
 
@@ -97,8 +97,6 @@ namespace
         DrawRectangle(x, y, CARD_WIDTH, CARD_HEIGHT, CARD_FILL);
         DrawRectangleLines(x, y, CARD_WIDTH, CARD_HEIGHT, edge);
 
-        // The key that takes this one, in its own corner so the eye can go
-        // straight from a number to a card and back.
         DrawRectangle(x, y, BADGE_SIZE, BADGE_SIZE, edge);
         DrawText(TextFormat("%i", index + 1), x + 7, y + 3, TITLE_SIZE, BLACK);
 
@@ -110,8 +108,6 @@ namespace
         for (int i = 0; i < lineCount; i++)
             DrawText(lines[i], x + CARD_PADDING, y + BADGE_SIZE + 8 + i * (BODY_SIZE + 3), BODY_SIZE, LIGHTGRAY);
 
-        // Where this sits in its run, as a figure. A one-off branch has no run to
-        // count through, so it says what it is instead.
         const char* footer = (def.MaxRank > 1) ? TextFormat("%i/%i", rank, (int)def.MaxRank)
                                                : (milestone ? "PATH" : "ONCE");
         DrawText(footer, x + CARD_PADDING, y + CARD_HEIGHT - BODY_SIZE - 6, BODY_SIZE,
