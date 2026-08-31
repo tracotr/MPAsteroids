@@ -201,7 +201,7 @@ void UpgradeUI::Draw(NetClient& net)
     // Stacked directly above the health bar, with room for the heading over it.
     const int cardY = healthBarY - 14 - CARD_HEIGHT;
 
-    const char* heading = milestone ? "CHOOSE YOUR PATH" : "CHOOSE AN UPGRADE";
+    const char* heading = milestone ? "CHOOSE A PATH (num 1-3)" : "CHOOSE AN UPGRADE (num 1-3)";
     const int headingWidth = MeasureText(heading, 16);
     DrawText(heading, (screenWidth - headingWidth) / 2, cardY - 20, 16,
              milestone ? MILESTONE_EDGE : RAYWHITE);
