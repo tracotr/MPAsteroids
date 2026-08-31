@@ -15,13 +15,11 @@ namespace Names
         std::vector<std::string> adjectives;
         std::vector<std::string> nouns;
 
-        // Used only when the file is missing or unreadable, so a bad asset build
-        // still gets a usable name instead of an empty one.
+        // Used only when the file is missing or unreadable.
         const char* const kFallbackAdjectives[] = { "Swift", "Rogue", "Lunar", "Solar" };
         const char* const kFallbackNouns[] = { "Pilot", "Hawk", "Drift", "Racer" };
 
-        // Also strips the carriage return left on each line by files saved with
-        // Windows line endings, which would otherwise end up inside a name.
+        // Also strips the carriage return left on each line by files saved with Windows line endings.
         void Trim(std::string& text)
         {
             size_t start = 0;
@@ -40,12 +38,10 @@ namespace Names
             text = text.substr(start, end - start);
         }
 
-        // How many characters the words may take up once the two digits and the
-        // terminator have their share.
+        // How many characters the words may take up once the two digits and the terminator have their share.
         const size_t ROOM_FOR_WORDS = MAX_PLAYER_NAME_LENGTH - 1 - 2;
 
-        // Trimming is silent otherwise, so someone adding a long word would only
-        // notice when a clipped name turned up on the leaderboard.
+        // Trimming is silent otherwise.
         void WarnIfNamesWouldBeCut()
         {
             size_t longestAdjective = 0;
@@ -85,8 +81,7 @@ namespace Names
             return;
         }
 
-        // Words go into whichever list the most recent [section] header named, so
-        // anything before the first header is ignored rather than guessed at.
+        // Words go into whichever list the most recent [section] header named.
         std::vector<std::string>* section = nullptr;
         std::string line;
 

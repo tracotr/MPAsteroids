@@ -19,18 +19,15 @@ void Player::Update(double delta)
         Sounds::StopBooster();
     }
 
-    // Everything the ship can do now comes from the build the server has us on,
-    // rather than from constants compiled into the ship itself.
+    // Everything the ship can do now comes from the build the server has us on.
     const ShipStats& stats = GameApp::GetInstance()->GetNet().GetStats();
 
-    // Clamped in double, not raymath's float Clamp: rounding the cap to float lands
-    // it just under the double it is tested against, and the gun never fires again.
+    // Clamped in double, not raymath's float Clamp.
     laserCooldown += delta;
     if (laserCooldown > stats.FireCooldown)
         laserCooldown = stats.FireCooldown;
 
-    // Clicking with the pointer loose captures it, so the mouse only fires once
-    // captured; otherwise the click that grabs the pointer also fires a laser.
+    // Clicking with the pointer loose captures it.
     const bool mouseCaptured = GameApp::GetInstance()->IsMouseCaptured();
     bool firing = IsKeyDown(KEY_SPACE) || (mouseCaptured && IsMouseButtonDown(MOUSE_BUTTON_LEFT));
 
@@ -53,8 +50,7 @@ void Player::Update(double delta)
         currentRotationSpeed = SlowRotationSpeed;
     }
 
-    // Mouse look, only while captured. GetMouseDelta is already movement since the
-    // last frame, so it needs no delta. Right yaws like D, away pitches like R.
+    // Mouse look, only while captured.
     if (mouseCaptured)
     {
         Vector2 look = GetMouseDelta();
@@ -74,8 +70,7 @@ void Player::Update(double delta)
     if (IsKeyDown(KEY_Q)) Rotation = MatrixMultiply(MatrixRotateZ(currentRotationSpeed), Rotation);
     if (IsKeyDown(KEY_E)) Rotation = MatrixMultiply(MatrixRotateZ(-currentRotationSpeed), Rotation);
 
-    // Thrust is a rate per second rather than a push per frame, tuned so that at
-    // sixty frames a second it accelerates exactly as it always did.
+    // Thrust is a rate per second rather than a push per frame, tuned.
     const bool forwardThrust = IsKeyDown(KEY_W);
     const bool reverseThrust = IsKeyDown(KEY_S);
     const float thrust = stats.Acceleration * (float)delta;
@@ -86,8 +81,7 @@ void Player::Update(double delta)
     if (reverseThrust)
         Velocity = Vector3Add(Velocity, Vector3Scale(Vector3Transform(Backward, Rotation), thrust));
 
-    // Reversing still tops out lower than flying forwards does, which is what the
-    // pair of separate limits here used to say.
+    // Reversing still tops out lower than flying forwards does.
     const float speedCap = (reverseThrust && !forwardThrust) ? stats.ReverseTopSpeed : stats.TopSpeed;
     const float speed = Vector3Length(Velocity);
     if (speed > speedCap && speed > 0.0001f)
@@ -104,6 +98,18 @@ void Player::Update(double delta)
 
     Position = Vector3Add(Position, Vector3Scale(Velocity, (float)delta));
 
+    // Holds the ship inside the world. Only the outward velocity goes, so it slides along.
+    const float fromCentre = Vector3Length(Position);
+    if (fromCentre > WORLD_RADIUS)
+    {
+        const Vector3 outward = Vector3Scale(Position, 1.0f / fromCentre);
+        Position = Vector3Scale(outward, WORLD_RADIUS);
+
+        const float escaping = Vector3DotProduct(Velocity, outward);
+        if (escaping > 0.0f)
+            Velocity = Vector3Subtract(Velocity, Vector3Scale(outward, escaping));
+    }
+
     if (IsKeyDown(KEY_Y)) Reset();
 }
 
@@ -119,12 +125,10 @@ void Player::Reset()
 
 namespace
 {
-    // Tries a few random spots and takes the best one, rather than using a fixed
-    // set of spawn points, because the things to avoid keep moving.
+    // Tries a few random spots and takes the best one, rather than using a fixed set of spawn points.
     const int SPAWN_CANDIDATES = 24;
 
-    // A spot this clear is good enough. Roughly half a second of laser flight, so
-    // a fresh ship has a moment before anyone nearby can reach it.
+    // A spot this clear is good enough.
     const float SPAWN_GOOD_ENOUGH = 14.0f;
 
     float RandomUnitFloat()
@@ -187,8 +191,7 @@ namespace
         return clearance;
     }
 
-    // Turns the ship back toward the middle, so spawning on the edge does not leave
-    // you staring into empty space. Model forward is -Z, hence the negation.
+    // Turns the ship back toward the middle.
     Matrix LookTowardOrigin(Vector3 from)
     {
         Vector3 forward = Vector3Subtract((Vector3){ 0.0f, 0.0f, 0.0f }, from);
@@ -213,8 +216,7 @@ namespace
 
 void Player::Respawn()
 {
-    // Picks the emptiest of a few spots out from the centre, so ships neither
-    // stack on each other nor reappear inside an asteroid.
+    // Picks the emptiest of a few spots out from the centre.
     Vector3 best = RandomSpawnCandidate();
     float bestClearance = SpawnClearance(best);
 

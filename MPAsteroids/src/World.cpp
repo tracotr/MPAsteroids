@@ -38,14 +38,12 @@ void World::Update(double delta)
         FireVolley(PlayerShip.Position, PlayerShip.Rotation, Net.GetStats(), Net.GetLocalPlayerId());
     }
 
-    // Volleys that arrived since the last frame, laid out here rather than sent
-    // laser by laser.
+    // Volleys that arrived since the last frame, laid out here rather than sent laser by laser.
     for (int i = 0; i < Net.RemoteVolleyCount; i++)
         SpawnRemoteVolley(Net.RemoteVolleyQueue[i], (float)Net.QueuedVolleyAge(i));
     Net.RemoteVolleyCount = 0;
     
-    // Before the lasers move, so a burst laser that came due this frame
-    // travels the same distance as one fired at the top of it.
+    // Before the lasers move, so a burst laser that came due this frame travels the same distance as one fired at the top of it.
     UpdatePendingLasers(GetTime());
 
     UpdateLasers(delta);
@@ -53,8 +51,7 @@ void World::Update(double delta)
     Net.UpdateLocalPlayer(PlayerShip.Position, PlayerShip.Rotation);
     Net.NetUpdate(GetTime(), delta);
 
-    // The shooter decides hits, so being killed arrives as a message rather
-    // than something we detect ourselves.
+    // The shooter decides hits, so being killed arrives as a message.
     int killerId = -1;
     if (Net.ConsumeKilled(&killerId))
     {
@@ -63,12 +60,28 @@ void World::Update(double delta)
         Sounds::PlayHurt(hitPosition, PlayerShip.Position);
     }
 
-    // Read after the network update, so a card that arrived this frame can be
-    // taken this frame rather than on the next one.
+    // Read after the network update.
     UpgradeUI::Update(Net);
 
     RefreshAsteroidFrame();
     CheckCollisions();
+}
+
+// Draws the world edge, fading in as you approach it.
+void World::DrawWorldBoundary(Vector3 viewer)
+{
+    // How near the edge you have to be before it shows.
+    const float FADE_IN = 40.0f;
+
+    const float distance = Vector3Length(viewer);
+    const float nearness = (distance - (WORLD_RADIUS - FADE_IN)) / FADE_IN;
+    if (nearness <= 0.0f)
+        return;
+
+    const float strength = nearness > 1.0f ? 1.0f : nearness;
+    const Color edge = { 90, 170, 255, (unsigned char)(40.0f + 150.0f * strength) };
+
+    DrawSphereWires((Vector3){ 0.0f, 0.0f, 0.0f }, WORLD_RADIUS, 24, 24, edge);
 }
 
 void World::Draw()
@@ -76,6 +89,7 @@ void World::Draw()
     Player& PlayerShip = GameApp::GetInstance()->GetPlayer();
 
     Models::DrawSkybox();
+    DrawWorldBoundary(PlayerShip.Position);
     PlayerShip.Draw();
     DrawPlayerModels();
     DrawAsteroidModels();
@@ -111,8 +125,7 @@ void World::DrawUI()
             otherPlayersData[otherPlayerCount].maxHealth = maxHealth;
             otherPlayersData[otherPlayerCount].level = Net.GetPlayerLevel(i);
 
-            // Read from the weapon the server stamps on their updates, so a
-            // client cannot hide its own name simply by claiming to.
+            // Read from the weapon the server stamps on their updates.
             const uint8_t evolution = Net.GetPlayerEvolution(i);
             const UpgradeDef* weapon = (evolution != UPGRADE_NONE) ? UpgradeCatalog::Find(evolution) : nullptr;
             otherPlayersData[otherPlayerCount].nameHidden =
@@ -184,8 +197,7 @@ void World::DrawPlayerIndicators(const PlayerIndicator* otherPlayersData, int ot
             DrawText(TextFormat("%0.0fm  L%i", distance, otherPlayersData[i].level),
                      (int)(screenPos.x - 15), (int)(screenPos.y - 28), 10, LIGHTGRAY);
 
-            // Only over someone with enough plating to survive more than one
-            // laser; a full bar over every ship would say the same thing each time.
+            // Only over someone with enough plating to survive more than one laser.
             const float maxHealth = otherPlayersData[i].maxHealth;
             if (maxHealth > 100.0f)
             {
@@ -200,8 +212,7 @@ void World::DrawPlayerIndicators(const PlayerIndicator* otherPlayersData, int ot
     }
 }
 
-// Bends a tracking laser toward whatever is worth hitting near it. Ships first,
-// or a laser that locked onto the nearest boulder would never reach anybody.
+// Bends a tracking laser toward whatever is worth hitting near it.
 void World::SteerHomingLaser(Laser& laser, double delta)
 {
     NetClient& Net = GameApp::GetInstance()->GetNet();
@@ -216,8 +227,7 @@ void World::SteerHomingLaser(Laser& laser, double delta)
     float bestDistanceSq = LASER_HOMING_RANGE * LASER_HOMING_RANGE;
     bool found = false;
 
-    // Only things ahead of the laser are worth turning toward; anything behind it
-    // is already missed, and chasing it would look like a guided missile.
+    // Only things ahead of the laser are worth turning toward.
     auto consider = [&](Vector3 position)
     {
         const Vector3 toTarget = Vector3Subtract(position, laser.position);
@@ -247,8 +257,7 @@ void World::SteerHomingLaser(Laser& laser, double delta)
         consider(position);
     }
 
-    // Rocks only if nobody is worth chasing. The list is one frame old, which at
-    // these speeds is not worth reordering the frame over.
+    // Rocks only if nobody is worth chasing.
     if (!found)
     {
         for (int i = 0; i < AsteroidFrameCount; i++)
@@ -290,8 +299,7 @@ void World::UpdateLasers(double delta)
         if (!Lasers[i].active)
             continue;
 
-        // Steered before it moves, so the laser travels this frame along the
-        // heading it just turned onto rather than the one it had last frame.
+        // Steered before it moves, so the laser travels this frame along the heading it just turned onto rather than the one it had last frame.
         if (Lasers[i].homing)
             SteerHomingLaser(Lasers[i], delta);
 
@@ -305,8 +313,7 @@ void World::UpdateLasers(double delta)
             highest = i + 1;
     }
 
-    // Pulled back in as lasers expire, so a quiet moment after a shotgun volley
-    // costs what a quiet moment should.
+    // Pulled back in as lasers expire.
     LaserHighWater = highest;
 }
 
@@ -316,7 +323,6 @@ void World::FireLaser(Vector3 position, Vector3 velocity, int ownerId, float lif
     NetClient& Net = GameApp::GetInstance()->GetNet();
 
     // Our own lasers may take any slot; everyone else's start past the reserve.
-    // A lobby firing shotguns fills this pool fast, and our laser must not be lost.
     const bool isLocal = (ownerId == Net.GetLocalPlayerId());
     const int firstSlot = isLocal ? 0 : LOCAL_LASER_RESERVE;
 
@@ -342,8 +348,7 @@ void World::FireLaser(Vector3 position, Vector3 velocity, int ownerId, float lif
     }
 }
 
-// Where the lasers go is decided by the shared pattern code, so everyone lays a
-// volley out the same way. This only turns that layout into lasers.
+// Where the lasers go is decided by the shared pattern code, so everyone lays a volley out the same way.
 void World::FireVolley(Vector3 origin, const Matrix& rotation, const ShipStats& stats, int ownerId)
 {
     NetClient& Net = GameApp::GetInstance()->GetNet();
@@ -351,15 +356,13 @@ void World::FireVolley(Vector3 origin, const Matrix& rotation, const ShipStats& 
     VolleyLaser lasers[MAX_VOLLEY_LASERS];
     const int count = ExpandVolley(stats, origin, rotation, LocalVolleyIndex, lasers, MAX_VOLLEY_LASERS);
 
-    // One message for the whole pull. Everyone receiving it walks the same pattern
-    // to the same lasers, so thirty lasers cost what one used to.
+    // One message for the whole pull.
     Net.SendVolley(origin,
                    Vector3Normalize(Vector3Transform((Vector3){ 0.0f, 0.0f, -1.0f }, rotation)),
                    Vector3Normalize(Vector3Transform((Vector3){ 0.0f, 1.0f, 0.0f }, rotation)),
                    LocalVolleyIndex);
 
-    // Counted per pull, not per laser: an alternating weapon swaps halves once a
-    // trigger pull, however many lasers that pull turned out to be.
+    // Counted per pull, not per laser.
     LocalVolleyIndex++;
 
     const double now = GetTime();
@@ -383,16 +386,14 @@ void World::FireVolley(Vector3 origin, const Matrix& rotation, const ShipStats& 
     }
 }
 
-// Fires one laser. Nothing is sent from here: the whole pull was described once
-// when the trigger went down, so this is purely a local event.
+// Fires one laser. Nothing is sent from here: the whole pull was described once when the trigger went down.
 void World::ReleaseLaser(Vector3 origin, Vector3 velocity, int ownerId, float lifeTime,
                          float radius, int pierce, float damage, bool homing)
 {
     FireLaser(origin, velocity, ownerId, lifeTime, radius, pierce, damage, homing);
 }
 
-// Rebuilds a rotation from the two axes a volley carries. The model's own
-// forward is -Z, which is why the third axis is the negation of it.
+// Rebuilds a rotation from the two axes a volley carries.
 static Matrix RotationFromAxes(Vector3 forward, Vector3 up)
 {
     Vector3 zAxis = Vector3Negate(Vector3Normalize(forward));
@@ -412,15 +413,13 @@ static Matrix RotationFromAxes(Vector3 forward, Vector3 up)
     return result;
 }
 
-// Turns somebody else's trigger pull back into lasers. Age is how long the packet
-// took to arrive: a burst already due is caught up, one still ahead waits.
+// Turns somebody else's trigger pull back into lasers.
 void World::SpawnRemoteVolley(const NetClient::RemoteVolleyEvent& volley, float age)
 {
     const UpgradeDef* def = (volley.WeaponId != UPGRADE_NONE)
                           ? UpgradeCatalog::Find(volley.WeaponId) : nullptr;
 
-    // Only the pattern and tracking come from the weapon. The rest was stamped by
-    // the server from that player's whole build, stat cards and all.
+    // Only the pattern and tracking come from the weapon.
     ShipStats stats;
     if (def != nullptr && def->Weapon != nullptr)
     {
@@ -505,21 +504,18 @@ void World::DrawLasers()
         if (!Lasers[i].active)
             continue;
 
-        // Nothing this small is worth drawing from the far side of the world,
-        // and the wide weapons put a lot of very small things in the air at once.
+        // Nothing this small is worth drawing from the far side of the world.
         if (Vector3DistanceSqr(camera.position, Lasers[i].position) >
             LASER_DRAW_DISTANCE * LASER_DRAW_DISTANCE)
             continue;
 
-        // Coarse on purpose. DrawSphere builds a sixteen-by-sixteen mesh a call,
-        // which with a hundred lasers in the air was most of a frame.
+        // Coarse on purpose. DrawSphere builds a sixteen-by-sixteen mesh a call.
         DrawSphereEx(Lasers[i].position, Lasers[i].radius * LASER_DRAW_RATIO,
                      4, 6, WHITE);
     }
 }
 
-// Walks the network's asteroid list once a frame, so each rotation is worked out
-// once rather than once for every job that needs it.
+// Walks the network's asteroid list once a frame.
 void World::RefreshAsteroidFrame()
 {
     NetClient& Net = GameApp::GetInstance()->GetNet();
@@ -546,15 +542,13 @@ void World::RefreshAsteroidFrame()
     }
 }
 
-// Moves a world point into a model's own space, so the test gives the same answer
-// whichever way the model is turned. Boxing it in the world is up to 75% wider.
+// Moves a world point into a model's own space.
 static Vector3 ToLocalSpace(Vector3 worldPoint, Vector3 origin, const Matrix& rotation)
 {
     return Vector3Transform(Vector3Subtract(worldPoint, origin), MatrixTranspose(rotation));
 }
 
-// How many points to test along one frame of travel, stepped by the laser's own
-// width. Testing only where it ended up would let a fast laser step over a ship.
+// How many points to test along one frame of travel, stepped by the laser's own width.
 static int SweepSamples(Vector3 from, Vector3 to, float radius)
 {
     const int MAX_SAMPLES = 12;
@@ -581,8 +575,7 @@ void World::CheckLaserCollisions()
         {
             AsteroidFrame& frame = AsteroidFrames[a];
 
-            // Cheap reject against the whole step, widened so nothing close is
-            // thrown away before the sweep gets a look at it.
+            // Cheap reject against the whole step.
             float reach = frame.Radius + radius
                         + Vector3Distance(Lasers[p].previousPosition, Lasers[p].position);
             if (Vector3DistanceSqr(frame.Position, Lasers[p].position) > reach * reach)
@@ -608,21 +601,18 @@ void World::CheckLaserCollisions()
 
             Sounds::PlayExplosion(frame.Position, PlayerShip.Position);
 
-            // A piercing laser carries on through and can break the next rock
-            // too; anything else stops here.
+            // A piercing laser carries on through and can break the next rock too.
             if (Lasers[p].pierceLeft > 0)
                 Lasers[p].pierceLeft--;
             else
                 Lasers[p].active = false;
 
-            // Only our own lasers are reported, or the first client to notice
-            // somebody else's would claim the rock. Their laser still stops here.
+            // Only our own lasers are reported.
             bool finished = false;
             if (Lasers[p].ownerId == localId)
                 finished = Net.ReportAsteroidHit(frame.Id, Lasers[p].damage);
 
-            // A rock leaves this frame's list only once finished, or the rest of
-            // a volley would sail through what the first laser just struck.
+            // A rock leaves this frame's list only once finished.
             if (finished)
                 AsteroidFrames[a] = AsteroidFrames[--AsteroidFrameCount];
             break;
@@ -643,8 +633,7 @@ bool World::CheckShipCollisions()
         if (Vector3DistanceSqr(frame.Position, PlayerShip.Position) > reach * reach)
             continue;
 
-        // The ship keeps its real shape, since the player steers it precisely;
-        // the rock is near enough a ball to treat as one.
+        // The ship keeps its real shape.
         Vector3 local = ToLocalSpace(frame.Position, PlayerShip.Position, PlayerShip.Rotation);
         if (!CheckCollisionBoxSphere(Models::ShipBoxLocal, local, frame.BodyRadius))
             continue;
@@ -652,7 +641,6 @@ bool World::CheckShipCollisions()
         Sounds::PlayHurt(frame.Position, PlayerShip.Position);
 
         // The rock breaks either way, and the server works out what it costs us.
-        // We do not respawn here: whether this was survivable is its to decide.
         Net.ReportAsteroidCollision(frame.Id);
 
         AsteroidFrames[i] = AsteroidFrames[--AsteroidFrameCount];
@@ -662,8 +650,7 @@ bool World::CheckShipCollisions()
     return false;
 }
 
-// Our lasers against everyone else's ships, judged by the shooter against the
-// positions it is drawing, so a hit lands when it looks like it should.
+// Our lasers against everyone else's ships, judged by the shooter against the positions it is drawing.
 bool World::CheckOutgoingFire()
 {
     Player& PlayerShip = GameApp::GetInstance()->GetPlayer();
@@ -693,8 +680,7 @@ bool World::CheckOutgoingFire()
             if (!Net.GetPlayerSpatial(i, &targetPos, &targetRot))
                 continue;
 
-            // Still drawn, but not shootable: their ship is sitting where we
-            // last heard from them rather than where they actually are.
+            // Still drawn, but not shootable: their ship is sitting where we last heard from them rather than where they actually are.
             if (Net.IsPlayerStale(i))
                 continue;
 
@@ -722,12 +708,10 @@ bool World::CheckOutgoingFire()
             else
                 Lasers[p].active = false;
 
-            // The server takes the health off them using our stored build, and ends
-            // their run only if that was the last of it.
+            // The server takes the health off them using our stored build.
             Net.ReportHit(i);
 
-            // One ship per laser per frame. A piercing laser gets the next on
-            // the frame after, so one laser cannot empty a formation in a step.
+            // One ship per laser per frame.
             return true;
         }
     }
@@ -765,8 +749,7 @@ void World::DrawAsteroidModels()
 
     Vector3 viewForward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
 
-    // Asteroids the server has not put back yet can sit well outside the world,
-    // and there is no point drawing those.
+    // Asteroids the server has not put back yet can sit well outside the world.
     const float cullDistance = ASTEROID_DRAW_DISTANCE;
 
     for (int i = 0; i < AsteroidFrameCount; i++)
@@ -779,8 +762,7 @@ void World::DrawAsteroidModels()
         if (distanceSq > cullDistance * cullDistance)
             continue;
 
-        // Behind the camera by more than its own radius, so it cannot be on
-        // screen no matter how wide the field of view is.
+        // Behind the camera by more than its own radius.
         if (Vector3DotProduct(viewForward, toAsteroid) < -frame.Radius)
             continue;
 

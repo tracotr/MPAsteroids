@@ -11,8 +11,7 @@ namespace
     // A burst weapon fires its lasers this far apart unless it says otherwise.
     constexpr double BURST_GAP = 0.07;
 
-    // The weapons. Every figure is against the base gun, not the tier below,
-    // because a tier replaces it. FireRateScale is a rate: 2.0 fires twice as often.
+    // The weapons. Every figure is against the base gun, not the tier below, because a tier replaces it.
 
     // --- tier one ---------------------------------------------------------
 
@@ -141,8 +140,7 @@ namespace
 
     // --- tier three, from Quad --------------------------------------------
 
-    // Sixteen positions around the ship, eight fired at a time: every other one
-    // on this pull, the ones between them on the next. 
+    // Sixteen positions around the ship, eight fired at a time.
     const WeaponProfile NorthStarProfile = []
     {
         WeaponProfile w;
@@ -274,7 +272,6 @@ namespace
     }();
 
     // The catalog, and adding an upgrade means adding a row here and nothing else.
-    // Tier order matters: the newest evolution is simply the last one owned.
     const UpgradeDef Catalog[] =
     {
         // --- stat cards, offered at every ordinary level ---
@@ -395,8 +392,7 @@ namespace
 
     const int CatalogCount = (int)(sizeof(Catalog) / sizeof(Catalog[0]));
 
-    // Rolled here rather than with the standard library, so offers do not depend
-    // on which machine the server is built on.
+    // Rolled here rather than with the standard library.
     uint32_t NextRandom(uint32_t& state)
     {
         if (state == 0) state = 0x9E3779B9u;
@@ -406,8 +402,7 @@ namespace
         return state;
     }
 
-    // Folds a weapon into the fields the rest of the game reads, and the one place
-    // a fire rate becomes a delay.
+    // Folds a weapon into the fields the rest of the game reads.
     void ApplyWeaponProfile(ShipStats& stats, const WeaponProfile& weapon)
     {
         stats.Damage = BASE_DAMAGE * weapon.DamageScale;
@@ -426,30 +421,26 @@ namespace
 
 namespace
 {
-    // A direction on the disc facing the way the ship does, used to spread a cone
-    // of lasers around its nose.
+    // A direction on the disc facing the way the ship does.
     Vector3 RadialDirection(const Vector3& right, const Vector3& up, float theta)
     {
         return Vector3Add(Vector3Scale(right, cosf(theta)), Vector3Scale(up, sinf(theta)));
     }
 
-    // A direction on the disc the ship flies in, the one you would see looking
-    // down on it. Zero is straight ahead, a quarter turn is off the right wing.
+    // A direction on the disc the ship flies in, the one you would see looking down on it.
     Vector3 HorizontalDirection(const Vector3& forward, const Vector3& right, float theta)
     {
         return Vector3Add(Vector3Scale(forward, cosf(theta)), Vector3Scale(right, sinf(theta)));
     }
 
-    // Tilts a radial direction back toward the nose by the spread, turning a flat
-    // ring around the ship into a cone thrown ahead of it.
+    // Tilts a radial direction back toward the nose by the spread.
     Vector3 ConeDirection(const Vector3& forward, const Vector3& radial, float spread)
     {
         return Vector3Normalize(Vector3Add(Vector3Scale(forward, cosf(spread)),
                                            Vector3Scale(radial, sinf(spread))));
     }
 
-    // A settled value in nought to one, from the volley and laser numbers rather
-    // than a generator, because a shotgun cloud must look the same to everyone.
+    // A settled value in nought to one, from the volley and laser numbers rather than a generator.
     float ScatterUnit(int volleyIndex, int roundIndex, uint32_t salt)
     {
         uint32_t h = (uint32_t)volleyIndex * 73856093u
@@ -461,8 +452,7 @@ namespace
         return (float)(h & 0xFFFFFFu) / (float)0xFFFFFFu;
     }
 
-    // A laser somewhere inside the cone. The square root spreads them over the
-    // area rather than bunching them into the middle.
+    // A laser somewhere inside the cone.
     Vector3 ScatterDirection(const Vector3& forward, const Vector3& right, const Vector3& up,
                              int volleyIndex, int roundIndex, float spread)
     {
@@ -504,8 +494,7 @@ int ExpandVolley(const ShipStats& stats, Vector3 origin, const Matrix& rotation,
 
     for (int burst = 0; burst < pattern.BurstCount; burst++)
     {
-        // Worked out per burst rather than once, because a pattern can swap
-        // halves between the bursts of a single pull as well as between pulls.
+        // Worked out per burst rather than once.
         const bool flipped =
             (pattern.Alternates == Alternation::ByVolley && ((volleyIndex & 1) != 0)) ||
             (pattern.Alternates == Alternation::ByBurst && ((burst & 1) != 0));
@@ -543,8 +532,7 @@ int ExpandVolley(const ShipStats& stats, Vector3 origin, const Matrix& rotation,
 
                 case PatternShape::Plus:
                 {
-                    // Out from the health, around the plane the ship flies in, first
-                    // laser down the nose. Alternating patterns have twice the slots.
+                    // Out from the health, around the plane the ship flies in, first laser down the nose.
                     const int slots = alternates ? perBurst * 2 : perBurst;
                     const int slot = alternates ? (i * 2 + (flipped ? 1 : 0)) : i;
                     const float theta = 2.0f * PI * (float)slot / (float)slots;
@@ -570,8 +558,7 @@ int ExpandVolley(const ShipStats& stats, Vector3 origin, const Matrix& rotation,
                                               Vector3Scale(right, leftSide ? -pattern.MuzzleOffset
                                                                            : pattern.MuzzleOffset));
 
-                    // Each barrel scatters independently: the laser number is
-                    // offset by the side so the two clouds are not copies.
+                    // Each barrel scatters independently.
                     laser.Direction = ScatterDirection(forward, right, up, volleyIndex,
                                                        inGroup + (leftSide ? 512 : 0),
                                                        pattern.SpreadRadians);
@@ -614,8 +601,7 @@ namespace UpgradeCatalog
     }
 }
 
-// Every level costs the same. Sixty is about a dozen rocks, so the cap is three
-// hundred and sixty of them rather than the eleven hundred the old curve wanted.
+// Every level costs the same.
 const int XP_PER_LEVEL = 60;
 
 int XpToReachLevel(int level)
@@ -662,8 +648,7 @@ uint8_t UpgradeState::OfferedId(int index) const
     return offered[index];
 }
 
-// Rebuilt in two passes: the newest evolution lays the gun down, then stat cards
-// multiply on top in table order, so the same cards always give the same ship.
+// Rebuilt in two passes: the newest evolution lays the gun down.
 void UpgradeState::Recompute()
 {
     stats = ShipStats();
@@ -700,8 +685,7 @@ uint8_t UpgradeState::WeaponEvolution() const
 {
     uint8_t found = UPGRADE_NONE;
 
-    // Table order runs tier one before two before three, so the last match is
-    // always the furthest along the branch.
+    // Table order runs tier one before two before three.
     for (int i = 0; i < CatalogCount; i++)
     {
         if (Catalog[i].Weapon != nullptr && RankOf(Catalog[i].Id) > 0)
@@ -719,8 +703,7 @@ bool UpgradeState::IsEligible(const UpgradeDef& def) const
     if (def.RequiresId != UPGRADE_NONE && RankOf(def.RequiresId) == 0)
         return false;
 
-    // Taking one member of a group shuts the others for good, so a branch is a
-    // commitment rather than something to collect.
+    // Taking one member of a group shuts the others for good.
     if (def.ExclusiveGroup != 0)
     {
         for (int i = 0; i < CatalogCount; i++)
@@ -756,8 +739,6 @@ void UpgradeState::ApplyDeathPenalty()
 {
     const int newLevel = level / 2;
 
-    // Cutting the history short is always safe: a prerequisite is picked before
-    // whatever needs it, so every prefix of a legal build is itself legal.
     if (historyCount > newLevel)
         historyCount = newLevel;
 
@@ -768,8 +749,7 @@ void UpgradeState::ApplyDeathPenalty()
     Recompute();
 }
 
-// Rolled for the level the next pick belongs to, not the level reached, so banking
-// two picks still gets the milestone choice the tenth level was owed.
+
 void UpgradeState::RollOffer(uint32_t& rngState)
 {
     offerCount = 0;
@@ -784,12 +764,9 @@ void UpgradeState::RollOffer(uint32_t& rngState)
     uint8_t candidates[64];
     int candidateCount = 0;
 
-    // Whether the cards on the table are the branch choice or the ordinary
-    // draft. The two are presented differently: see below.
-    bool fromMilestoneList = false;
 
-    // A milestone offers evolutions only. The second pass covers that list coming
-    // up empty after a death drops a player back past a fork they already took.
+    bool fromMilestoneList = false;
+    // A milestone offers evolutions only.
     for (int pass = 0; pass < 2 && candidateCount == 0; pass++)
     {
         const bool wantMilestone = isMilestone && (pass == 0);
@@ -814,16 +791,14 @@ void UpgradeState::RollOffer(uint32_t& rngState)
         if (candidateCount > 0)
             fromMilestoneList = wantMilestone;
 
-        // An ordinary level has nothing to fall back to, so one pass is all it
-        // ever needs.
+        // An ordinary level has nothing to fall back to, so one pass is all it ever needs.
         if (!isMilestone)
             break;
     }
 
     const int wanted = candidateCount < UPGRADE_OFFER_COUNT ? candidateCount : UPGRADE_OFFER_COUNT;
 
-    // A branch choice is never shuffled, so key two is always the same weapon.
-    // Candidates come from walking the catalog, so they are already in order.
+    // A branch choice is never shuffled, so key is always the same
     if (fromMilestoneList)
     {
         for (int i = 0; i < wanted; i++)
@@ -831,8 +806,7 @@ void UpgradeState::RollOffer(uint32_t& rngState)
         return;
     }
 
-    // The ordinary draft keeps its shuffle: three of nine drawn fresh each level is
-    // the point of it. Shuffled only as far as we actually read.
+    // ordinary draft
     for (int i = 0; i < wanted; i++)
     {
         const int j = i + (int)(NextRandom(rngState) % (uint32_t)(candidateCount - i));
@@ -849,8 +823,7 @@ bool UpgradeState::Choose(uint8_t upgradeId)
     if (PendingPicks() <= 0 || historyCount >= MAX_UPGRADE_PICKS)
         return false;
 
-    // Only ever one of the cards actually shown. Without this a client could
-    // name any id it liked and walk straight to a tier three weapon.
+    // Only ever one of the cards actually shown.
     bool wasOffered = false;
     for (int i = 0; i < offerCount; i++)
     {
@@ -896,8 +869,7 @@ void UpgradeState::WriteTo(UpgradeStatePacket& packet) const
     std::memset(packet.Padding, 0, sizeof(packet.Padding));
 }
 
-// Everything here arrives from the server, but is still clamped: a mirror that
-// trusted it blindly would read off the end of its arrays on a bad packet.
+// Everything here arrives from the server, but is still clamped.
 void UpgradeState::ReadFrom(const UpgradeStatePacket& packet)
 {
     xp = packet.Xp;

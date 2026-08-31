@@ -7,7 +7,6 @@ class Entity
 {
 public:
     // Top speed and acceleration live in ShipStats, because upgrades move them.
-    // Turning is still per frame, since nothing upgrades it.
     float RotationSpeed = 0.025f;
     float SlowRotationSpeed = 0.01f;
 

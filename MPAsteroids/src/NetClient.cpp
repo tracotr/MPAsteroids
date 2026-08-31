@@ -59,8 +59,7 @@ bool NetClient::NetConnect(const char* serverAddress, const char* playerName)
     RemoteVolleyCount = 0;
     AsteroidCount = 0;
 
-    // The server sends the real build the moment it accepts us. This is only so
-    // that a frame drawn before that arrives has sane numbers to work from.
+    // The server sends the real build the moment it accepts us.
     Upgrades.Reset();
     LocalHealth = Upgrades.Stats().MaxHealth;
     LocalMaxHealth = Upgrades.Stats().MaxHealth;
@@ -90,8 +89,7 @@ bool NetClient::NetConnect(const char* serverAddress, const char* playerName)
     else
         std::snprintf(url, sizeof(url), "%s://%s:%d%s", scheme, serverAddress, port, SERVER_PATH);
 
-    // The compile-time address is only a default; the page can retarget this build
-    // without a rebuild. Accepts a bare host, host:port, or a full URL.
+    // The compile-time address is only a default; the page can retarget this build without a rebuild.
     char serverOverride[256] = { 0 };
 
     // EM_ASM splits its body on top-level commas, so declare each var separately.
@@ -272,8 +270,7 @@ bool NetClient::GetPlayerSpatial(int id, Vector3* pos, Matrix* rot)
     return true;
 }
 
-// Whether a player has gone quiet. Separate from GetPlayerSpatial on purpose: a
-// quiet player is still drawn, they just cannot be laser.
+// Whether a player has gone quiet.
 static double NowSeconds()
 {
     return emscripten_get_now() * 0.001;
@@ -297,7 +294,6 @@ bool NetClient::IsPlayerStale(int id) const
 }
 
 // The rock is hidden now, because it is about to break whatever else happens.
-// What it costs us is scaled by the server from its size and our health.
 void NetClient::ReportAsteroidCollision(uint32_t asteroidId)
 {
     if (asteroidId == 0)
@@ -349,8 +345,7 @@ int NetClient::GetPlayerLevel(int id) const
 
 namespace
 {
-    // Asteroids arrive with a seed instead of a rotation, so the spin is worked out
-    // here. From the seed alone, so every player sees the same rock turning.
+    // Asteroids arrive with a seed instead of a rotation, so the spin is worked out here.
     void DeriveSpin(uint8_t seed, Vector3* axis, float* speed)
     {
         uint32_t hash = (uint32_t)seed * 2654435761u;
@@ -365,8 +360,7 @@ namespace
     }
 }
 
-// Merges an update into the list we hold, keeping the position and spin of rocks
-// we have seen before. Matched by Id, since both sides reuse slots freely.
+// Merges an update into the list we hold, keeping the position and spin of rocks we have seen before.
 void NetClient::ReportHit(int victimId)
 {
     PlayerHitPacket buffer = {};
@@ -424,8 +418,7 @@ void NetClient::ApplyAsteroidSnapshot(const AsteroidInfoPacket& packet, int coun
         asteroid.Velocity = info.Velocity;
         asteroid.Scale = info.Scale;
 
-        // The server's figure wins. Ours was a guess made between broadcasts, and
-        // it does not know what anyone else has been shooting at.
+        // The server's figure wins. Ours was a guess made between broadcasts.
         asteroid.Health = info.Health;
 
         // Too far off to be our own guess drifting: the server has moved it.
@@ -442,8 +435,7 @@ void NetClient::ApplyAsteroidSnapshot(const AsteroidInfoPacket& packet, int coun
         stillPresent[slot] = true;
     }
 
-    // Drop everything the server no longer lists, filling each gap with the
-    // last live entry so the array stays packed.
+    // Drop everything the server no longer lists.
     for (int i = AsteroidCount - 1; i >= 0; i--)
     {
         if (stillPresent[i])
@@ -458,8 +450,7 @@ void NetClient::ApplyAsteroidSnapshot(const AsteroidInfoPacket& packet, int coun
     }
 }
 
-// Returns false when the same asteroid was hidden a moment ago, which is the
-// caller's cue not to bother the server about it again.
+// Returns false when the same asteroid was hidden a moment ago.
 void NetClient::HideAsteroidLocally(uint32_t asteroidId)
 {
     for (int i = 0; i < AsteroidCount; i++)
@@ -467,8 +458,7 @@ void NetClient::HideAsteroidLocally(uint32_t asteroidId)
         if (Asteroids[i].Id != asteroidId)
             continue;
 
-        // Hidden without waiting for the server to answer, so hitting a rock feels
-        // immediate. The grace period restores it if the server declines.
+        // Hidden without waiting for the server to answer, so hitting a rock feels immediate.
         Asteroids[i].DestroyReportedAt = LastNow;
         return;
     }
@@ -486,15 +476,13 @@ bool NetClient::ReportAsteroidHit(uint32_t asteroidId, float damage)
         if (Asteroids[i].Id != asteroidId)
             continue;
 
-        // Already hidden and still within the wait period: our guess says this
-        // rock is gone, so there is nothing left to shoot at.
+        // Already hidden and still within the wait period: our guess says this rock is gone.
         if (Asteroids[i].DestroyReportedAt > 0.0 && LastNow - Asteroids[i].DestroyReportedAt < DESTROY_REPORT_GRACE)
             return true;
 
         Asteroids[i].Health -= damage;
 
-        // Hidden without waiting for the reply, so the laser that finishes a rock
-        // feels like it did. The grace period restores it if the server disagrees.
+        // Hidden without waiting for the reply, so the laser that finishes a rock feels like it did.
         if (Asteroids[i].Health <= 0.0f)
         {
             Asteroids[i].DestroyReportedAt = LastNow;
@@ -527,8 +515,7 @@ bool NetClient::GetAsteroidSpatial(int index, Vector3* pos, Matrix* rot, float* 
 
     const ClientAsteroid& asteroid = Asteroids[index];
 
-    // Reported destroyed locally and not yet confirmed: treat it as gone, so it
-    // is neither drawn nor collided with.
+    // Reported destroyed locally and not yet confirmed: treat it as gone.
     if (asteroid.DestroyReportedAt > 0.0 && LastNow - asteroid.DestroyReportedAt < DESTROY_REPORT_GRACE)
         return false;
 
@@ -671,8 +658,7 @@ void NetClient::DispatchPacket(const uint8_t* data, size_t length)
         UpgradeStatePacket recieved;
         memcpy(&recieved, data, sizeof(UpgradeStatePacket));
 
-        // Everything the ship can do is recomputed from this by the same catalog
-        // the server ran, so the two never disagree about what a build means.
+        // Everything the ship can do is recomputed from this by the same catalog the server ran.
         Upgrades.ReadFrom(recieved);
     }
     else if (command == NetworkCommands::UpdateHealth)
@@ -744,7 +730,6 @@ void NetClient::SendVolley(Vector3 position, Vector3 forward, Vector3 up, int vo
     buffer.Up = up;
     buffer.VolleyIndex = (uint8_t)(volleyIndex & 0xFF);
 
-    // Speed, size, range and weapon are all stamped by the server from our build
-    // before it passes this on, so there is no point filling them in here.
+    // Speed, size, range and weapon are all stamped by the server from our build before it passes this on.
     SendPacket(&buffer, sizeof(buffer));
 }

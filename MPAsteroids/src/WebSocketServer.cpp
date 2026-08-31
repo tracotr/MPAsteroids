@@ -35,8 +35,7 @@
 
 namespace
 {
-    // SHA1 is required only to derive the handshake's Sec-WebSocket-Accept value
-    // (RFC 6455). It is not used as a security primitive here.
+    // SHA1 is required only to derive the handshake's Sec-WebSocket-Accept value (RFC 6455).
     struct Sha1Digest { uint8_t bytes[20]; };
 
     uint32_t RotateLeft(uint32_t value, int bits) { return (value << bits) | (value >> (32 - bits)); }
@@ -261,8 +260,7 @@ void WebSocketServer::Disconnect(ConnId id)
 
 namespace
 {
-    // Consumes one frame from the front of recvBuf, returning false when the
-    // buffer holds only a partial frame. Control frames are handled internally.
+    // Consumes one frame from the front of recvBuf.
     bool TryParseFrame(std::vector<uint8_t>& recvBuf, std::vector<uint8_t>& sendBuf, std::vector<uint8_t>& outMessage, bool& gotMessage, bool& shouldClose)
     {
         gotMessage = false;
@@ -308,8 +306,7 @@ namespace
 
         if (!fin)
         {
-            // The game protocol only sends small single-frame messages, so a
-            // fragmented frame means something is wrong. Drop the connection.
+            // The game protocol only sends small single-frame messages.
             shouldClose = true;
         }
         else if (opcode == 0x2 || opcode == 0x1) // binary or text

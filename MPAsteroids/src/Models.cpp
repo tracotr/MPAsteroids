@@ -19,8 +19,7 @@ namespace Models
     float AsteroidRadiusLocal = 0.0f;
     float AsteroidBodyRadius = 0.0f;
 
-    // Distance from the middle of the box out to a corner, so the model still
-    // fits inside that radius whichever way it is turned.
+    // Distance from the middle of the box out to a corner.
     static float BoxRadius(const BoundingBox& box)
     {
         Vector3 extents = Vector3Scale(Vector3Subtract(box.max, box.min), 0.5f);
@@ -84,8 +83,7 @@ namespace Models
         rlEnableDepthMask();
     }
     
-    // Key hints, dim and small so they sit behind the action. Kept in step with
-    // Player::Update by hand, so change both together.
+    // Key hints, dim and small so they sit behind the action.
     static void DrawControlHints()
     {
         static const char* const hints[] = {
@@ -105,14 +103,12 @@ namespace Models
         const int lineHeight = 15;
         const int margin = 20;
 
-        // Stacked upward from the bottom edge so the block stays put as the
-        // window is resized.
+        // Stacked upward from the bottom edge so the block stays put as the window is resized.
         const int top = GetScreenHeight() - margin - lineHeight * hintCount;
         for (int i = 0; i < hintCount; i++)
             DrawText(hints[i], margin, top + lineHeight * i, fontSize, GRAY);
 
-        // Only worth saying while the pointer is loose, which is also the one
-        // time the player cannot steer with it.
+        // Only worth saying while the pointer is loose.
         if (!GameApp::GetInstance()->IsMouseCaptured())
             DrawText("click to capture mouse", margin, top - lineHeight - 4, fontSize, LIGHTGRAY);
     }
@@ -155,8 +151,7 @@ namespace Models
             ranked[j + 1] = current;
         }
 
-        // Rows are drawn left-to-right from here, so a left anchor keeps long
-        // names on screen.
+        // Rows are drawn left-to-right from here, so a left anchor keeps long names on screen.
         const int panelX = 20;
         DrawText(TextFormat("Leaderboard (%i)", rankedCount), panelX, 20, 20, RAYWHITE);
 
