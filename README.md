@@ -11,7 +11,7 @@ Mouse and keyboard both work at the same time. Click once to capture the
 pointer, and press Escape to release it.
 
 - Mouse : Pitch and yaw
-- Left click : Shoot
+- Left click : Shoot/Lock Mouse
 - W / S : Thrust forwards / backwards
 - A / D : Yaw
 - R / F : Pitch
